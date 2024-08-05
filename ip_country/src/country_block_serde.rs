@@ -1,6 +1,10 @@
+use std::fmt::Debug;
+use std::marker::PhantomData;
 use crate::bit_queue::BitQueue;
 use crate::country_block_stream::{Country, CountryBlock, IpRange};
 use std::net::{Ipv4Addr, Ipv6Addr};
+use std::ops::Deref;
+use crate::country_finder;
 
 /*
 
@@ -118,34 +122,26 @@ CountryBlock {
  */
 
 pub struct CountryBlockSerializer {
-    prev_start_ipv4: Ipv4Addr,
-    prev_end_ipv4: Ipv4Addr,
-    bit_queue_ipv4: BitQueue,
-    prev_start_ipv6: Ipv6Addr,
-    prev_end_ipv6: Ipv6Addr,
-    bit_queue_ipv6: BitQueue,
+    ipv4: VersionedIPSerializer<Ipv4Addr>,
+    ipv6: VersionedIPSerializer<Ipv6Addr>
 }
 
 impl CountryBlockSerializer {
     pub fn new() -> Self {
         Self {
-            prev_start_ipv4: Ipv4Addr::new(255, 255, 255, 254),
-            prev_end_ipv4: Ipv4Addr::new(255, 255, 255, 255),
-            bit_queue_ipv4: BitQueue::new(),
-            prev_start_ipv6: Ipv6Addr::new(
+            ipv4: VersionedIPSerializer::new(Ipv4Addr::new(255, 255, 255, 254), Ipv4Addr::new(255, 255, 255, 255)),
+            ipv6: VersionedIPSerializer::new(Ipv6Addr::new(
                 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFE,
-            ),
-            prev_end_ipv6: Ipv6Addr::new(
+            ), Ipv6Addr::new(
                 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF,
-            ),
-            bit_queue_ipv6: BitQueue::new(),
+            ))
         }
     }
 
     pub fn add(&mut self, country_block: CountryBlock) {
         match country_block.ip_range {
-            IpRange::V4(start, end) => self.add_ipv4(start, end, country_block.country.index),
-            IpRange::V6(start, end) => self.add_ipv6(start, end, country_block.country.index),
+            IpRange::V4(start, end) => self.ipv4.add_ip(start, end, country_block.country.index),
+            IpRange::V6(start, end) => self.ipv6.add_ip(start, end, country_block.country.index),
         }
     }
 
@@ -154,133 +150,260 @@ impl CountryBlockSerializer {
         let last_ipv6 = Ipv6Addr::new(
             0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF,
         );
-        if self.prev_end_ipv4 != last_ipv4 {
-            self.add_ipv4(plus_one_ipv4(self.prev_end_ipv4), last_ipv4, 0);
+        if self.ipv4.prev_end != last_ipv4 {
+            self.ipv4.add_ip(Ipv4Addr::plus_one_ip(self.ipv4.prev_end), last_ipv4, 0);
         }
-        if self.prev_end_ipv6 != last_ipv6 {
-            self.add_ipv6(plus_one_ipv6(self.prev_end_ipv6), last_ipv6, 0);
+        if self.ipv6.prev_end != last_ipv6 {
+            self.ipv6.add_ip(Ipv6Addr::plus_one_ip(self.ipv6.prev_end), last_ipv6, 0);
         }
-        (self.bit_queue_ipv4, self.bit_queue_ipv6)
+        (self.ipv4.bit_queue, self.ipv6.bit_queue)
     }
+}
 
-    fn add_ipv4(&mut self, start: Ipv4Addr, end: Ipv4Addr, country_index: usize) {
-        let expected_start = plus_one_ipv4(self.prev_end_ipv4);
+struct VersionedIPSerializer<VersionedIP>{
+    prev_start: VersionedIP,
+    prev_end: VersionedIP,
+    bit_queue: BitQueue,
+}
+
+pub trait Serializer<VersionedIP>{
+    fn differences(from: VersionedIP, to: VersionedIP) -> Vec<Difference> where Self: Sized;
+    fn add_bits(&mut self, bit_data: u64, bit_count: usize);
+}
+
+impl Serializer<Ipv6Addr> for VersionedIPSerializer<Ipv6Addr>{
+    fn differences(from: Ipv6Addr, to: Ipv6Addr) -> Vec<Difference> where Self: Sized{
+        todo!()
+    }
+    fn add_bits(&mut self, bit_data: u64, bit_count: usize){
+        todo!()
+    }
+}
+
+impl Serializer<Ipv4Addr> for VersionedIPSerializer<Ipv4Addr>{
+    fn differences(from: Ipv4Addr, to: Ipv4Addr) -> Vec<Difference> where Self: Sized{
+        todo!()
+    }
+    fn add_bits(&mut self, bit_data: u64, bit_count: usize){
+        todo!()
+    }
+}
+
+// Here, I'd rather see a private declaration to prevent this implementation from escaping this
+// local namespace while it's going to be used for types that have much wider usage than that but
+// this method will be useless elsewhere
+trait PlusMinusOneIP {
+    fn plus_one_ip(ip: Self) -> Self;
+    fn minus_one_ip(ip: Self) -> Self;
+}
+
+impl PlusMinusOneIP for Ipv4Addr{
+    fn plus_one_ip(ip: Self) -> Self{
+        todo!()
+    }
+    fn minus_one_ip(ip: Self) -> Self{
+        todo!()
+    }
+}
+
+impl PlusMinusOneIP for Ipv6Addr{
+    fn plus_one_ip(ip: Self) -> Self {
+        todo!()
+    }
+    fn minus_one_ip(ip: Self) -> Self {
+        todo!()
+    }
+}
+
+impl <VersionedIP> VersionedIPSerializer<VersionedIP>
+    where VersionedIP: PlusMinusOneIP + Copy + PartialEq
+{
+
+    // where VersionedIP: IPIntoSegments<SegmentBitRep, SegmentsCount>,
+    // SegmentBitRep: PartialEq,
+    // u64: From<SegmentBitRep>
+    fn add_ip<SegmentBitRep, const SegmentsCount: usize>(&mut self, start: VersionedIP, end: VersionedIP, country_index: usize)
+        where
+            VersionedIP: IPIntoSegments<SegmentBitRep, SegmentsCount>,
+            SegmentBitRep: PartialEq,
+            u64: From<SegmentBitRep>
+    {
+        let expected_start = VersionedIP::plus_one_ip(self.prev_end);
         if start != expected_start {
-            self.add_ipv4(expected_start, minus_one_ipv4(start), 0)
+            self.add_ip(expected_start, VersionedIP::minus_one_ip(start), 0)
         }
-        let differences = Self::differences_ipv4(self.prev_start_ipv4, start);
+        let differences = Self::ips_into_differences(self.prev_start, start);
         let difference_count_minus_one = (differences.len() - 1) as u64;
-        self.bit_queue_ipv4.add_bits(difference_count_minus_one, 2);
+        self.bit_queue.add_bits(difference_count_minus_one, 2);
         differences.into_iter().for_each(|difference| {
-            self.bit_queue_ipv4.add_bits(difference.index as u64, 2);
-            self.bit_queue_ipv4.add_bits(difference.value, 8);
+            self.bit_queue.add_bits(difference.index as u64, 2);
+            self.bit_queue.add_bits(difference.value, 8);
         });
-        self.bit_queue_ipv4.add_bits(country_index as u64, 9);
-        self.prev_start_ipv4 = start;
-        self.prev_end_ipv4 = end;
+        self.bit_queue.add_bits(country_index as u64, 9);
+        self.prev_start = start;
+        self.prev_end = end;
     }
+    //
+    // //TODO maybe you don't need this
+    // fn prev_start_ip(&self) -> Self::VersionedIp{
+    //     self.prev_start
+    // }
+    //
+    // //TODO maybe you don't need this
+    // fn prev_end_ip(&self) -> Self::VersionedIp{
+    //     self.prev_end
+    // }
+    //
+    // //TODO maybe you don't need this
+    // fn set_prev_start_ip(&mut self, start_ip: Self::VersionedIp){
+    //     self.prev_start = start_ip
+    // }
+    //
+    // //TODO maybe you don't need this
+    // fn set_prev_end_ip(&mut self, end_ip: Self::VersionedIp){
+    //     self.prev_end = end_ip
+    // }
+}
 
-    fn add_ipv6(&mut self, start: Ipv6Addr, end: Ipv6Addr, country_index: usize) {
-        let expected_start = plus_one_ipv6(self.prev_end_ipv6);
-        if start != expected_start {
-            self.add_ipv6(expected_start, minus_one_ipv6(start), 0)
+impl <VersionedIP> VersionedIPSerializer<VersionedIP>
+{
+    
+    fn new(prev_start: VersionedIP, prev_end: VersionedIP)->VersionedIPSerializer<VersionedIP>{
+        let bit_queue =  BitQueue::new();
+        Self{
+            prev_start,
+            prev_end,
+            bit_queue,
         }
-        let differences = Self::differences_ipv6(self.prev_start_ipv6, start);
-        let difference_count_minus_one = (differences.len() - 1) as u64;
-        self.bit_queue_ipv6.add_bits(difference_count_minus_one, 3);
-        differences.into_iter().for_each(|difference| {
-            self.bit_queue_ipv6.add_bits(difference.index as u64, 3);
-            self.bit_queue_ipv6.add_bits(difference.value, 16);
-        });
-        self.bit_queue_ipv6.add_bits(country_index as u64, 9);
-        self.prev_start_ipv6 = start;
-        self.prev_end_ipv6 = end;
     }
-
-    fn differences_ipv4(from: Ipv4Addr, to: Ipv4Addr) -> Vec<Difference> {
-        let pairs = from.octets().into_iter().zip(to.octets().into_iter());
-        pairs
-            .into_iter()
-            .enumerate()
-            .flat_map(|(index, (from_octet, to_octet))| {
-                if to_octet == from_octet {
-                    None
-                } else {
-                    Some(Difference {
-                        index,
-                        value: to_octet as u64,
-                    })
-                }
-            })
-            .collect::<Vec<Difference>>()
-    }
-
-    fn differences_ipv6(from: Ipv6Addr, to: Ipv6Addr) -> Vec<Difference> {
+    
+    fn ips_into_differences< SegmentBitRep, const SegmentsCount: usize>(from: VersionedIP, to: VersionedIP) -> Vec<Difference>
+        where
+            VersionedIP: IPIntoSegments<SegmentBitRep, SegmentsCount>,
+            SegmentBitRep: PartialEq,
+            u64: From<SegmentBitRep>
+    {
         let pairs = from.segments().into_iter().zip(to.segments().into_iter());
         pairs
-            .into_iter()
             .enumerate()
-            .flat_map(|(index, (from_segment, to_segment))| {
+            .flat_map(|(index, (from_segment, to_segment)): (_,(SegmentBitRep, SegmentBitRep))| {
                 if to_segment == from_segment {
                     None
                 } else {
                     Some(Difference {
                         index,
-                        value: to_segment as u64,
+                        value: u64::from(to_segment),
                     })
                 }
             })
-            .collect::<Vec<Difference>>()
+            .collect()
     }
 }
 
-pub trait CountryBlockDeserializer {
-    fn next(&mut self) -> Option<CountryBlock>;
+trait IPIntoSegments<BitsPerSegment, const SegmentsCount: usize>{
+    fn segments(&self)->[BitsPerSegment;SegmentsCount];
 }
 
+impl IPIntoSegments<u8, 4> for Ipv4Addr{
+    fn segments(&self) -> [u8;4] {
+        self.octets()
+    }
+}
+
+impl IPIntoSegments<u16, 8> for Ipv6Addr{
+    fn segments(&self) -> [u16;8] {
+        self.segments()
+    }
+}
+
+// Now the implementation on the deserialization follows
+
+
 #[derive(Debug)]
-pub struct CountryBlockDeserializerIpv4 {
-    prev_record: StreamRecordIpv4,
+pub struct CountryBlockDeserializer<VersionedIP> where VersionedIP: Debug {
+    prev_record: StreamRecord<VersionedIP>,
     bit_queue: BitQueue,
     empty: bool,
 }
 
-impl CountryBlockDeserializer for CountryBlockDeserializerIpv4 {
-    fn next(&mut self) -> Option<CountryBlock> {
-        if self.empty {
+pub trait Deserializer<VersionedIP, BitsPerSegment, const SegmentsCount: usize>
+    where
+        VersionedIP: IPIntoSegments<BitsPerSegment, SegmentsCount> + Debug,
+        BitsPerSegment: TryFrom<u64>,
+        <BitsPerSegment as TryFrom<u64>>::Error: Debug,
+        Self: Sized
+{
+    fn new(country_data: (Vec<u64>,usize))-> CountryBlockDeserializer<VersionedIP>;
+    //TODO this can be taken out of the trait definition and put into the std impl block
+    fn get_record(bit_queue: &mut BitQueue, prev_start: VersionedIP)->Option<StreamRecord<VersionedIP>>{
+        let segments:[BitsPerSegment;SegmentsCount] = prev_start.segments();
+        let difference_count = Self::read_difference_count(bit_queue)?;
+        let differences = Self::read_differences(bit_queue, difference_count);
+        if differences.len() < difference_count {
             return None;
         }
-        let next_record_opt = Self::get_record(&mut self.bit_queue, self.prev_record.start);
-        match next_record_opt {
-            Some(next_record) => {
-                let prev_block = CountryBlock {
-                    ip_range: IpRange::V4(
-                        self.prev_record.start,
-                        minus_one_ipv4(next_record.start),
-                    ),
-                    country: Country::from(self.prev_record.country_idx),
-                };
-                self.prev_record = next_record;
-                Some(prev_block)
-            }
-            None => {
-                self.empty = true;
-                Some(CountryBlock {
-                    ip_range: IpRange::V4(
-                        self.prev_record.start,
-                        Ipv4Addr::new(255, 255, 255, 255),
-                    ),
-                    country: Country::from(self.prev_record.country_idx),
-                })
-            }
-        }
+        let country_idx = bit_queue.take_bits(9)? as usize;
+        Some(StreamRecord::<VersionedIP>::new(differences, segments, country_idx))
+    }
+    fn max_ip_value()->VersionedIP;
+    fn read_difference_count(bit_queue: &mut BitQueue) -> Option<usize>;
+    fn read_differences(bit_queue: &mut BitQueue,difference_count: usize)->Vec<Difference>;
+}
+
+// A full example of implementation for Ipv4Addr
+impl Deserializer<Ipv4Addr, u8, 4> for CountryBlockDeserializer<Ipv4Addr>{
+    fn new(country_data: (Vec<u64>,usize)) -> CountryBlockDeserializer<Ipv4Addr> {
+        Self::new_generic(country_data,Ipv4Addr::new(255, 255, 255, 254))
+    }
+
+    fn max_ip_value() -> Ipv4Addr {
+        Ipv4Addr::new(255, 255, 255, 255)
+    }
+
+    fn read_difference_count(bit_queue: &mut BitQueue) -> Option<usize> {
+        Some((bit_queue.take_bits(2)? + 1) as usize)
+    }
+
+    fn read_differences(bit_queue: &mut BitQueue, difference_count: usize)->Vec<Difference>{Self::read_differences_generic(bit_queue, difference_count,2,8)}
+}
+
+impl Deserializer<Ipv6Addr, u16, 8> for CountryBlockDeserializer<Ipv6Addr>{
+    fn new(country_data: (Vec<u64>, usize)) -> CountryBlockDeserializer<Ipv6Addr> {
+        Self::new_generic(country_data,Ipv6Addr::new(
+            0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFE,
+        ))
+    }
+
+    fn max_ip_value() -> Ipv6Addr {
+        Ipv6Addr::new(
+            0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF,
+        )
+    }
+
+    fn read_difference_count(bit_queue: &mut BitQueue) -> Option<usize> {
+        Some((bit_queue.take_bits(3)? + 1) as usize)
+    }
+
+    fn read_differences(bit_queue: &mut BitQueue,difference_count: usize) -> Vec<Difference> {
+        Self::read_differences_generic(bit_queue, difference_count,3,16)
     }
 }
 
-impl CountryBlockDeserializerIpv4 {
-    pub fn new(country_data_ipv4: (Vec<u64>, usize)) -> Self {
-        let mut bit_queue = bit_queue_from_country_data(country_data_ipv4);
-        let prev_record = Self::get_record(&mut bit_queue, Ipv4Addr::new(255, 255, 255, 254))
+impl <VersionedIP> CountryBlockDeserializer<VersionedIP>
+
+    where VersionedIP: PlusMinusOneIP + Copy + Debug,
+          IpRange: From<(VersionedIP, VersionedIP)>,
+{
+
+    fn new_generic<BitsPerSegment, const SegmentsCount: usize>(country_data: (Vec<u64>, usize), previous_start: VersionedIP)-> CountryBlockDeserializer<VersionedIP>
+        where
+            VersionedIP: IPIntoSegments<BitsPerSegment, SegmentsCount>,
+            Self: Deserializer<VersionedIP,BitsPerSegment,SegmentsCount>,
+            BitsPerSegment: TryFrom<u64>,
+            <BitsPerSegment as TryFrom<u64>>::Error: Debug,
+    {
+        let mut bit_queue = bit_queue_from_country_data(country_data);
+        let prev_record = CountryBlockDeserializer::<VersionedIP>::get_record(&mut bit_queue, previous_start)
             .expect("Empty BitQueue");
         Self {
             prev_record,
@@ -289,39 +412,7 @@ impl CountryBlockDeserializerIpv4 {
         }
     }
 
-    fn get_record(bit_queue: &mut BitQueue, prev_start: Ipv4Addr) -> Option<StreamRecordIpv4> {
-        let mut octets = prev_start.octets();
-        let difference_count = (bit_queue.take_bits(2)? + 1) as usize;
-        let differences = (0..difference_count)
-            .map(|_| {
-                Some(Difference {
-                    index: bit_queue.take_bits(2)? as usize,
-                    value: bit_queue.take_bits(8)?,
-                })
-            })
-            .flatten()
-            .collect::<Vec<Difference>>();
-        if differences.len() < difference_count {
-            return None;
-        }
-        differences
-            .into_iter()
-            .for_each(|d| octets[d.index] = d.value as u8);
-        Some(StreamRecordIpv4 {
-            start: Ipv4Addr::from(octets),
-            country_idx: bit_queue.take_bits(9)? as usize,
-        })
-    }
-}
-
-pub struct CountryBlockDeserializerIpv6 {
-    prev_record: StreamRecordIpv6,
-    bit_queue: BitQueue,
-    empty: bool,
-}
-
-impl CountryBlockDeserializer for CountryBlockDeserializerIpv6 {
-    fn next(&mut self) -> Option<CountryBlock> {
+    pub fn next(&mut self) -> Option<CountryBlock> {
         if self.empty {
             return None;
         }
@@ -329,10 +420,10 @@ impl CountryBlockDeserializer for CountryBlockDeserializerIpv6 {
         match next_record_opt {
             Some(next_record) => {
                 let prev_block = CountryBlock {
-                    ip_range: IpRange::V6(
+                    ip_range: IpRange::from((
                         self.prev_record.start,
-                        minus_one_ipv6(next_record.start),
-                    ),
+                        VersionedIP::minus_one_ip(next_record.start),
+                    )),
                     country: Country::from(self.prev_record.country_idx),
                 };
                 self.prev_record = next_record;
@@ -341,60 +432,349 @@ impl CountryBlockDeserializer for CountryBlockDeserializerIpv6 {
             None => {
                 self.empty = true;
                 Some(CountryBlock {
-                    ip_range: IpRange::V6(
+                    ip_range: IpRange::from((
                         self.prev_record.start,
-                        Ipv6Addr::new(
-                            0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF,
-                        ),
-                    ),
+                        Self::max_ip_value(),
+                    )),
                     country: Country::from(self.prev_record.country_idx),
                 })
             }
         }
     }
-}
 
-impl CountryBlockDeserializerIpv6 {
-    pub fn new(country_data_ipv6: (Vec<u64>, usize)) -> Self {
-        let mut bit_queue = bit_queue_from_country_data(country_data_ipv6);
-        let prev_record = Self::get_record(
-            &mut bit_queue,
-            Ipv6Addr::new(
-                0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFE,
-            ),
-        )
-        .expect("Empty BitQueue");
-        Self {
-            prev_record,
-            bit_queue,
-            empty: false,
-        }
-    }
-
-    fn get_record(bit_queue: &mut BitQueue, prev_start: Ipv6Addr) -> Option<StreamRecordIpv6> {
-        let mut segments = prev_start.segments();
-        let difference_count = (bit_queue.take_bits(3)? + 1) as usize;
-        let differences = (0..difference_count)
+    fn read_differences_generic(bit_queue: &mut BitQueue, difference_count: usize, index_bit_count: usize, value_bit_count: usize) -> Vec<Difference>{
+        (0..difference_count)
             .map(|_| {
                 Some(Difference {
-                    index: bit_queue.take_bits(3)? as usize,
-                    value: bit_queue.take_bits(16)?,
+                    index: bit_queue.take_bits(index_bit_count)? as usize,
+                    value: bit_queue.take_bits(value_bit_count)?,
                 })
             })
             .flatten()
-            .collect::<Vec<Difference>>();
-        if differences.len() < difference_count {
-            return None;
-        }
-        differences
-            .into_iter()
-            .for_each(|d| segments[d.index] = d.value as u16);
-        Some(StreamRecordIpv6 {
-            start: Ipv6Addr::from(segments),
-            country_idx: bit_queue.take_bits(9)? as usize,
-        })
+            .collect()
     }
 }
+
+struct VersionedIp<IPType, SegmentNumRep, const SegmentCount: usize>{
+    ip_value: IPType,
+    segment_num_rep: PhantomData<SegmentNumRep>,
+}
+
+#[derive(Debug)]
+struct StreamRecord<VersionedIP> where VersionedIP: Debug {
+    start: VersionedIP,
+    country_idx: usize,
+}
+
+impl <VersionedIP: Debug> StreamRecord<VersionedIP>
+{
+    fn new<SegmentBitRep, const SegmentsCount: usize>(differences: Vec<Difference>, mut segments: [SegmentBitRep;SegmentsCount], country_idx: usize) -> StreamRecord<VersionedIP>
+        where
+            VersionedIP: From<[SegmentBitRep; SegmentsCount]>,
+            SegmentBitRep: TryFrom<u64>,
+            <SegmentBitRep as TryFrom<u64>>::Error: Debug
+    {
+        differences
+            .into_iter()
+            .for_each(|d| segments[d.index] = SegmentBitRep::try_from(d.value).expect("Difference noted in a bigger number than which the IP segment can contain"));
+        Self {
+            start: VersionedIP::from(segments),
+            country_idx,
+        }
+    }
+}
+
+// Each of these from impls needs a test
+impl From<(Ipv4Addr, Ipv4Addr)> for IpRange {
+    fn from((start, end): (Ipv4Addr, Ipv4Addr)) -> Self {
+        todo!()
+    }
+}
+
+impl From<(Ipv6Addr, Ipv6Addr)> for IpRange {
+    fn from((start, end): (Ipv6Addr, Ipv6Addr)) -> Self {
+        todo!()
+    }
+}
+//
+// pub struct CountryBlockSerializer {
+//     prev_start_ipv4: Ipv4Addr,
+//     prev_end_ipv4: Ipv4Addr,
+//     bit_queue_ipv4: BitQueue,
+//     prev_start_ipv6: Ipv6Addr,
+//     prev_end_ipv6: Ipv6Addr,
+//     bit_queue_ipv6: BitQueue,
+// }
+//
+// impl CountryBlockSerializer {
+//     pub fn new() -> Self {
+//         Self {
+//             prev_start_ipv4: Ipv4Addr::new(255, 255, 255, 254),
+//             prev_end_ipv4: Ipv4Addr::new(255, 255, 255, 255),
+//             bit_queue_ipv4: BitQueue::new(),
+//             prev_start_ipv6: Ipv6Addr::new(
+//                 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFE,
+//             ),
+//             prev_end_ipv6: Ipv6Addr::new(
+//                 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF,
+//             ),
+//             bit_queue_ipv6: BitQueue::new(),
+//         }
+//     }
+//
+//     pub fn add(&mut self, country_block: CountryBlock) {
+//         match country_block.ip_range {
+//             IpRange::V4(start, end) => self.add_ipv4(start, end, country_block.country.index),
+//             IpRange::V6(start, end) => self.add_ipv6(start, end, country_block.country.index),
+//         }
+//     }
+//
+//     pub fn finish(mut self) -> (BitQueue, BitQueue) {
+//         let last_ipv4 = Ipv4Addr::new(0xFF, 0xFF, 0xFF, 0xFF);
+//         let last_ipv6 = Ipv6Addr::new(
+//             0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF,
+//         );
+//         if self.prev_end_ipv4 != last_ipv4 {
+//             self.add_ipv4(plus_one_ipv4(self.prev_end_ipv4), last_ipv4, 0);
+//         }
+//         if self.prev_end_ipv6 != last_ipv6 {
+//             self.add_ipv6(plus_one_ipv6(self.prev_end_ipv6), last_ipv6, 0);
+//         }
+//         (self.bit_queue_ipv4, self.bit_queue_ipv6)
+//     }
+//
+//     fn add_ipv4(&mut self, start: Ipv4Addr, end: Ipv4Addr, country_index: usize) {
+//         let expected_start = plus_one_ipv4(self.prev_end_ipv4);
+//         if start != expected_start {
+//             self.add_ipv4(expected_start, minus_one_ipv4(start), 0)
+//         }
+//         let differences = Self::differences_ipv4(self.prev_start_ipv4, start);
+//         let difference_count_minus_one = (differences.len() - 1) as u64;
+//         self.bit_queue_ipv4.add_bits(difference_count_minus_one, 2);
+//         differences.into_iter().for_each(|difference| {
+//             self.bit_queue_ipv4.add_bits(difference.index as u64, 2);
+//             self.bit_queue_ipv4.add_bits(difference.value, 8);
+//         });
+//         self.bit_queue_ipv4.add_bits(country_index as u64, 9);
+//         self.prev_start_ipv4 = start;
+//         self.prev_end_ipv4 = end;
+//     }
+//
+//     fn add_ipv6(&mut self, start: Ipv6Addr, end: Ipv6Addr, country_index: usize) {
+//         let expected_start = plus_one_ipv6(self.prev_end_ipv6);
+//         if start != expected_start {
+//             self.add_ipv6(expected_start, minus_one_ipv6(start), 0)
+//         }
+//         let differences = Self::differences_ipv6(self.prev_start_ipv6, start);
+//         let difference_count_minus_one = (differences.len() - 1) as u64;
+//         self.bit_queue_ipv6.add_bits(difference_count_minus_one, 3);
+//         differences.into_iter().for_each(|difference| {
+//             self.bit_queue_ipv6.add_bits(difference.index as u64, 3);
+//             self.bit_queue_ipv6.add_bits(difference.value, 16);
+//         });
+//         self.bit_queue_ipv6.add_bits(country_index as u64, 9);
+//         self.prev_start_ipv6 = start;
+//         self.prev_end_ipv6 = end;
+//     }
+
+    // fn differences_ipv4(from: Ipv4Addr, to: Ipv4Addr) -> Vec<Difference> {
+    //     let pairs = from.octets().into_iter().zip(to.octets().into_iter());
+    //     pairs
+    //         .into_iter()
+    //         .enumerate()
+    //         .flat_map(|(index, (from_octet, to_octet))| {
+    //             if to_octet == from_octet {
+    //                 None
+    //             } else {
+    //                 Some(Difference {
+    //                     index,
+    //                     value: to_octet as u64,
+    //                 })
+    //             }
+    //         })
+    //         .collect::<Vec<Difference>>()
+    // }
+    //
+    // fn differences_ipv6(from: Ipv6Addr, to: Ipv6Addr) -> Vec<Difference> {
+    //     let pairs = from.segments().into_iter().zip(to.segments().into_iter());
+    //     pairs
+    //         .into_iter()
+    //         .enumerate()
+    //         .flat_map(|(index, (from_segment, to_segment))| {
+    //             if to_segment == from_segment {
+    //                 None
+    //             } else {
+    //                 Some(Difference {
+    //                     index,
+    //                     value: to_segment as u64,
+    //                 })
+    //             }
+    //         })
+    //         .collect::<Vec<Difference>>()
+    // }
+//}
+//
+// pub trait CountryBlockDeserializer {
+//     fn next(&mut self) -> Option<CountryBlock>;
+// }
+
+// #[derive(Debug)]
+// pub struct CountryBlockDeserializerIpv4 {
+//     prev_record: StreamRecordIpv4,
+//     bit_queue: BitQueue,
+//     empty: bool,
+// }
+
+// impl CountryBlockDeserializer for CountryBlockDeserializerIpv4 {
+//     fn next(&mut self) -> Option<CountryBlock> {
+//         if self.empty {
+//             return None;
+//         }
+//         let next_record_opt = Self::get_record(&mut self.bit_queue, self.prev_record.start);
+//         match next_record_opt {
+//             Some(next_record) => {
+//                 let prev_block = CountryBlock {
+//                     ip_range: IpRange::V4(
+//                         self.prev_record.start,
+//                         minus_one_ipv4(next_record.start),
+//                     ),
+//                     country: Country::from(self.prev_record.country_idx),
+//                 };
+//                 self.prev_record = next_record;
+//                 Some(prev_block)
+//             }
+//             None => {
+//                 self.empty = true;
+//                 Some(CountryBlock {
+//                     ip_range: IpRange::V4(
+//                         self.prev_record.start,
+//                         Ipv4Addr::new(255, 255, 255, 255),
+//                     ),
+//                     country: Country::from(self.prev_record.country_idx),
+//                 })
+//             }
+//         }
+//     }
+// }
+//
+// impl CountryBlockDeserializerIpv4 {
+//     pub fn new(country_data_ipv4: (Vec<u64>, usize)) -> Self {
+//         let mut bit_queue = bit_queue_from_country_data(country_data_ipv4);
+//         let prev_record = Self::get_record(&mut bit_queue, Ipv4Addr::new(255, 255, 255, 254))
+//             .expect("Empty BitQueue");
+//         Self {
+//             prev_record,
+//             bit_queue,
+//             empty: false,
+//         }
+//     }
+//
+//     fn get_record(bit_queue: &mut BitQueue, prev_start: Ipv4Addr) -> Option<StreamRecordIpv4> {
+//         let mut octets = prev_start.octets();
+//         let difference_count = (bit_queue.take_bits(2)? + 1) as usize;
+//         let differences = (0..difference_count)
+//             .map(|_| {
+//                 Some(Difference {
+//                     index: bit_queue.take_bits(2)? as usize,
+//                     value: bit_queue.take_bits(8)?,
+//                 })
+//             })
+//             .flatten()
+//             .collect::<Vec<Difference>>();
+//         if differences.len() < difference_count {
+//             return None;
+//         }
+//         differences
+//             .into_iter()
+//             .for_each(|d| octets[d.index] = d.value as u8);
+//         Some(StreamRecordIpv4 {
+//             start: Ipv4Addr::from(octets),
+//             country_idx: bit_queue.take_bits(9)? as usize,
+//         })
+//     }
+// }
+//
+// pub struct CountryBlockDeserializerIpv6 {
+//     prev_record: StreamRecordIpv6,
+//     bit_queue: BitQueue,
+//     empty: bool,
+// }
+//
+// impl CountryBlockDeserializer for CountryBlockDeserializerIpv6 {
+//     fn next(&mut self) -> Option<CountryBlock> {
+//         if self.empty {
+//             return None;
+//         }
+//         let next_record_opt = Self::get_record(&mut self.bit_queue, self.prev_record.start);
+//         match next_record_opt {
+//             Some(next_record) => {
+//                 let prev_block = CountryBlock {
+//                     ip_range: IpRange::V6(
+//                         self.prev_record.start,
+//                         minus_one_ipv6(next_record.start),
+//                     ),
+//                     country: Country::from(self.prev_record.country_idx),
+//                 };
+//                 self.prev_record = next_record;
+//                 Some(prev_block)
+//             }
+//             None => {
+//                 self.empty = true;
+//                 Some(CountryBlock {
+//                     ip_range: IpRange::V6(
+//                         self.prev_record.start,
+//                         Ipv6Addr::new(
+//                             0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF,
+//                         ),
+//                     ),
+//                     country: Country::from(self.prev_record.country_idx),
+//                 })
+//             }
+//         }
+//     }
+// }
+//
+// impl CountryBlockDeserializerIpv6 {
+//     pub fn new(country_data_ipv6: (Vec<u64>, usize)) -> Self {
+//         let mut bit_queue = bit_queue_from_country_data(country_data_ipv6);
+//         let prev_record = Self::get_record(
+//             &mut bit_queue,
+//             Ipv6Addr::new(
+//                 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFE,
+//             ),
+//         )
+//         .expect("Empty BitQueue");
+//         Self {
+//             prev_record,
+//             bit_queue,
+//             empty: false,
+//         }
+//     }
+//
+//     fn get_record(bit_queue: &mut BitQueue, prev_start: Ipv6Addr) -> Option<StreamRecordIpv6> {
+//         let mut segments = prev_start.segments();
+//         let difference_count = (bit_queue.take_bits(3)? + 1) as usize;
+//         let differences = (0..difference_count)
+//             .map(|_| {
+//                 Some(Difference {
+//                     index: bit_queue.take_bits(3)? as usize,
+//                     value: bit_queue.take_bits(16)?,
+//                 })
+//             })
+//             .flatten()
+//             .collect::<Vec<Difference>>();
+//         if differences.len() < difference_count {
+//             return None;
+//         }
+//         differences
+//             .into_iter()
+//             .for_each(|d| segments[d.index] = d.value as u16);
+//         Some(StreamRecordIpv6 {
+//             start: Ipv6Addr::from(segments),
+//             country_idx: bit_queue.take_bits(9)? as usize,
+//         })
+//     }
+// }
 
 #[derive(Debug)]
 struct StreamRecordIpv4 {
@@ -721,7 +1101,7 @@ mod tests {
         let remaining_bit_count = bit_queue.len();
         let data = bit_queue.take_bits(remaining_bit_count).unwrap();
         bit_data.push(data);
-        let mut subject = CountryBlockDeserializerIpv4::new((bit_data, bit_queue_len));
+        let mut subject = CountryBlockDeserializer::<Ipv4Addr>::new((bit_data, bit_queue_len));
 
         let country_block1 = subject.next().unwrap();
         let country_block2 = subject.next().unwrap();
@@ -800,7 +1180,7 @@ mod tests {
         let data = bitqueue.take_bits(remaining_bit_count).unwrap();
         vec_64.push(data);
 
-        let mut deserializer = CountryBlockDeserializerIpv4::new((vec_64, len));
+        let mut deserializer = CountryBlockDeserializer::<Ipv4Addr>::new((vec_64, len));
 
         let result = deserializer.next();
         assert_eq!(result.unwrap().country.iso3166, "SK");
@@ -1091,7 +1471,7 @@ mod tests {
         let remaining_bit_count = bit_queue.len();
         let data = bit_queue.take_bits(remaining_bit_count).unwrap();
         bit_data.push(data);
-        let mut subject = CountryBlockDeserializerIpv6::new((bit_data, bit_queue_len));
+        let mut subject = CountryBlockDeserializer::<Ipv6Addr>::new((bit_data, bit_queue_len));
 
         let country_block1 = subject.next().unwrap();
         let country_block2 = subject.next().unwrap();
@@ -1170,7 +1550,7 @@ mod tests {
         let data = bitqueue.take_bits(remaining_bit_count).unwrap();
         vec_64.push(data);
 
-        let mut deserializer = CountryBlockDeserializerIpv6::new((vec_64, len));
+        let mut deserializer = CountryBlockDeserializer::<Ipv6Addr>::new((vec_64, len));
 
         let result = deserializer.next();
         assert_eq!(result.unwrap().country.iso3166, "ZZ");

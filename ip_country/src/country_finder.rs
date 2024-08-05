@@ -1,9 +1,8 @@
-use crate::country_block_serde::{
-    CountryBlockDeserializer, CountryBlockDeserializerIpv4, CountryBlockDeserializerIpv6,
-};
+
 use crate::country_block_stream::{Country, CountryBlock};
 use lazy_static::lazy_static;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use crate::country_block_serde::{CountryBlockDeserializer, Deserializer};
 
 lazy_static! {
     pub static ref COUNTRY_CODE_FINDER: CountryCodeFinder = CountryCodeFinder::new(
@@ -26,7 +25,7 @@ impl CountryCodeFinder {
 
     fn initialize_country_finder_ipv4(data: (Vec<u64>, usize)) -> Vec<CountryBlock> {
         //TODO write two tests - one for deserializer and one for loop to fill up the vec
-        let mut deserializer = CountryBlockDeserializerIpv4::new(data);
+        let mut deserializer = CountryBlockDeserializer::<Ipv4Addr>::new(data);
         let mut result: Vec<CountryBlock> = vec![];
         loop {
             match deserializer.next() {
@@ -40,7 +39,7 @@ impl CountryCodeFinder {
     }
 
     fn initialize_country_finder_ipv6(data: (Vec<u64>, usize)) -> Vec<CountryBlock> {
-        let mut deserializer = CountryBlockDeserializerIpv6::new(data);
+        let mut deserializer = CountryBlockDeserializer::<Ipv6Addr>::new(data);
         let mut result: Vec<CountryBlock> = vec![];
         loop {
             match deserializer.next() {
@@ -104,6 +103,7 @@ mod tests {
     use lazy_static::lazy_static;
     use std::str::FromStr;
     use std::time::SystemTime;
+    use crate::country_block_serde::CountryBlockDeserializer;
 
     lazy_static! {
         static ref COUNTRY_CODE_FINDER_TEST: CountryCodeFinder =
@@ -264,9 +264,9 @@ mod tests {
         let mut result_ipv6: Vec<CountryBlock> = vec![];
         let timestart = SystemTime::now();
         let mut deserializer_ipv4 =
-            CountryBlockDeserializerIpv4::new(crate::dbip_country::ipv4_country_data());
+            CountryBlockDeserializer::<Ipv4Addr>::new(crate::dbip_country::ipv4_country_data());
         let mut deserializer_ipv6 =
-            CountryBlockDeserializerIpv6::new(crate::dbip_country::ipv6_country_data());
+            CountryBlockDeserializer::<Ipv6Addr>::new(crate::dbip_country::ipv6_country_data());
         let timeend = SystemTime::now();
 
         let timestart_fill = SystemTime::now();
