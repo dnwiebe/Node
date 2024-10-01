@@ -678,6 +678,8 @@ impl PersistentConfigurationMock {
 
     set_arbitrary_id_stamp_in_mock_impl!();
 
+    // TODO: Review this, maybe we should return an error instead of panic?
+    // Also unsure why we have the else if clause.
     fn result_from<T: Clone>(results: &RefCell<Vec<T>>) -> T {
         let mut borrowed = results.borrow_mut();
         if borrowed.is_empty() {

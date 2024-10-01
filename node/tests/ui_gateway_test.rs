@@ -120,6 +120,7 @@ fn daemon_does_not_allow_node_to_keep_his_client_alive_integration() {
             ("chain", Some("polygon-mainnet")),
             ("neighborhood-mode", Some("standard")),
             ("log-level", Some("trace")),
+            ("blockchain-service-url", Some("https://example.com")),
             ("data-directory", Some(&data_directory.to_str().unwrap())),
         ]))
         .unwrap();

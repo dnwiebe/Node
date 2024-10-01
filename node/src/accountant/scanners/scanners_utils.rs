@@ -6,7 +6,7 @@ pub mod payable_scanner_utils {
     use crate::accountant::scanners::scanners_utils::payable_scanner_utils::PayableTransactingErrorEnum::{
         LocallyCausedError, RemotelyCausedErrors,
     };
-    use crate::accountant::{comma_joined_stringifiable, ProcessedPayableFallible, SentPayables};
+    use crate::accountant::{comma_joined_stringifiable, SentPayables};
     use crate::sub_lib::accountant::PaymentThresholds;
     use crate::sub_lib::wallet::Wallet;
     use itertools::Itertools;
@@ -18,7 +18,7 @@ pub mod payable_scanner_utils {
     use web3::types::H256;
     use crate::accountant::db_access_objects::pending_payable_dao::PendingPayable;
     use crate::blockchain::blockchain_interface::data_structures::errors::PayableTransactionError;
-    use crate::blockchain::blockchain_interface::data_structures::{RpcPayablesFailure};
+    use crate::blockchain::blockchain_interface::data_structures::{ProcessedPayableFallible, RpcPayableFailure};
 
     #[derive(Debug, PartialEq, Eq)]
     pub enum PayableTransactingErrorEnum {
@@ -152,8 +152,10 @@ pub mod payable_scanner_utils {
         logger: &'b Logger,
     ) -> SeparateTxsByResult<'a> {
         match rpc_result {
-            Ok(pending_payable) => add_pending_payable(acc, pending_payable),
-            Err(RpcPayablesFailure {
+            ProcessedPayableFallible::Correct(pending_payable) => {
+                add_pending_payable(acc, pending_payable)
+            }
+            ProcessedPayableFallible::Failed(RpcPayableFailure {
                 rpc_error,
                 recipient_wallet,
                 hash,
@@ -438,7 +440,7 @@ mod tests {
     use std::time::SystemTime;
     use crate::accountant::db_access_objects::pending_payable_dao::PendingPayable;
     use crate::blockchain::blockchain_interface::data_structures::errors::{BlockchainError, PayableTransactionError};
-    use crate::blockchain::blockchain_interface::data_structures::{RpcPayablesFailure};
+    use crate::blockchain::blockchain_interface::data_structures::{ProcessedPayableFallible, RpcPayableFailure};
 
     #[test]
     fn investigate_debt_extremes_picks_the_most_relevant_records() {
@@ -508,8 +510,8 @@ mod tests {
         };
         let sent_payable = SentPayables {
             payment_procedure_result: Ok(vec![
-                Ok(correct_payment_1.clone()),
-                Ok(correct_payment_2.clone()),
+                ProcessedPayableFallible::Correct(correct_payment_1.clone()),
+                ProcessedPayableFallible::Correct(correct_payment_2.clone()),
             ]),
             response_skeleton_opt: None,
         };
@@ -550,13 +552,16 @@ mod tests {
             recipient_wallet: make_wallet("blah"),
             hash: make_tx_hash(123),
         };
-        let bad_rpc_call = RpcPayablesFailure {
+        let bad_rpc_call = RpcPayableFailure {
             rpc_error: web3::Error::InvalidResponse("That jackass screwed it up".to_string()),
             recipient_wallet: make_wallet("whooa"),
             hash: make_tx_hash(0x315),
         };
         let sent_payable = SentPayables {
-            payment_procedure_result: Ok(vec![Ok(payable_ok.clone()), Err(bad_rpc_call.clone())]),
+            payment_procedure_result: Ok(vec![
+                ProcessedPayableFallible::Correct(payable_ok.clone()),
+                ProcessedPayableFallible::Failed(bad_rpc_call.clone()),
+            ]),
             response_skeleton_opt: None,
         };
 
@@ -757,7 +762,9 @@ mod tests {
                 "blah".to_string(),
             )),
             PayableTransactionError::MissingConsumingWallet,
-            PayableTransactionError::GasPriceQueryFailed("ouch".to_string()),
+            PayableTransactionError::GasPriceQueryFailed(BlockchainError::QueryFailed(
+                "ouch".to_string(),
+            )),
             PayableTransactionError::UnusableWallet("fooo".to_string()),
             PayableTransactionError::Signing("tsss".to_string()),
         ];
