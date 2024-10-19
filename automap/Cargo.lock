@@ -16,7 +16,7 @@ dependencies = [
  "fnv",
  "futures",
  "libc",
- "log 0.4.17",
+ "log 0.4.22",
  "parking_lot 0.7.1",
  "smallvec",
  "tokio",
@@ -104,7 +104,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fdb8867f378f33f78a811a8eb9bf108ad99430d7aad43315dd9319c827ef6247"
 dependencies = [
  "http",
- "log 0.4.17",
+ "log 0.4.22",
  "url 2.3.1",
  "wildmatch",
 ]
@@ -139,12 +139,12 @@ checksum = "d468802bab17cbc0cc575e9b053f41e72aa36bfa6b7f55e3529ffa43161b97fa"
 name = "automap"
 version = "0.8.2"
 dependencies = [
- "crossbeam-channel 0.5.8",
+ "crossbeam-channel 0.5.13",
  "flexi_logger",
  "igd",
  "lazy_static",
  "local_ipaddress",
- "log 0.4.17",
+ "log 0.4.22",
  "masq_lib",
  "port_scanner",
  "pretty-hex",
@@ -373,12 +373,11 @@ dependencies = [
 
 [[package]]
 name = "crossbeam-channel"
-version = "0.5.8"
+version = "0.5.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a33c2bf77f2df06183c3aa30d1e96c0695a313d4f9c453cc3762a6db39f99200"
+checksum = "33480d6946193aa8033910124896ca395333cae7e2d1113d1fef6c3272217df2"
 dependencies = [
- "cfg-if 1.0.0",
- "crossbeam-utils 0.8.15",
+ "crossbeam-utils 0.8.20",
 ]
 
 [[package]]
@@ -441,12 +440,9 @@ dependencies = [
 
 [[package]]
 name = "crossbeam-utils"
-version = "0.8.15"
+version = "0.8.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3c063cd8cc95f5c377ed0d4b49a4b21f632396ff690e8470c29b3359b346984b"
-dependencies = [
- "cfg-if 1.0.0",
-]
+checksum = "22ec99545bb0ed0ea7bb9b8e1e9122ea386ff8a48c0922e43f36d45ab09e0e80"
 
 [[package]]
 name = "crunchy"
@@ -629,7 +625,7 @@ dependencies = [
  "chrono",
  "glob",
  "lazy_static",
- "log 0.4.17",
+ "log 0.4.22",
  "regex",
  "thiserror",
  "yansi",
@@ -859,7 +855,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "556b5a75cd4adb7c4ea21c64af1c48cefb2ce7d43dc4352c720a1fe47c21f355"
 dependencies = [
  "attohttpc",
- "log 0.4.17",
+ "log 0.4.22",
  "rand 0.8.5",
  "url 2.3.1",
  "xmltree",
@@ -1028,17 +1024,14 @@ version = "0.3.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e19e8d5c34a3e0e2223db8e060f9e8264aeeb5c5fc64a4ee9965c062211c024b"
 dependencies = [
- "log 0.4.17",
+ "log 0.4.22",
 ]
 
 [[package]]
 name = "log"
-version = "0.4.17"
+version = "0.4.22"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "abb12e687cfb44aa40f41fc3978ef76448f9b6038cad6aef4259d3c095a2382e"
-dependencies = [
- "cfg-if 1.0.0",
-]
+checksum = "a7a70ba024b9dc04c27ea2f0c0548feb474ec5c54bba33a7f72f873a39d07b24"
 
 [[package]]
 name = "lru-cache"
@@ -1056,12 +1049,12 @@ dependencies = [
  "actix",
  "clap",
  "const_format",
- "crossbeam-channel 0.5.8",
+ "crossbeam-channel 0.5.13",
  "dirs",
  "ethereum-types",
  "itertools",
  "lazy_static",
- "log 0.4.17",
+ "log 0.4.22",
  "nix",
  "regex",
  "serde",
@@ -1151,7 +1144,7 @@ dependencies = [
  "iovec",
  "kernel32-sys",
  "libc",
- "log 0.4.17",
+ "log 0.4.22",
  "miow",
  "net2",
  "slab",
@@ -2105,7 +2098,7 @@ checksum = "57fc868aae093479e3131e3d165c93b1c7474109d13c90ec0dda2a1bbfff0674"
 dependencies = [
  "bytes 0.4.12",
  "futures",
- "log 0.4.17",
+ "log 0.4.22",
 ]
 
 [[package]]
@@ -2117,7 +2110,7 @@ dependencies = [
  "crossbeam-utils 0.7.2",
  "futures",
  "lazy_static",
- "log 0.4.17",
+ "log 0.4.22",
  "mio",
  "num_cpus",
  "parking_lot 0.9.0",
@@ -2179,7 +2172,7 @@ dependencies = [
  "crossbeam-utils 0.7.2",
  "futures",
  "lazy_static",
- "log 0.4.17",
+ "log 0.4.22",
  "num_cpus",
  "slab",
  "tokio-executor",
@@ -2205,7 +2198,7 @@ checksum = "e2a0b10e610b39c38b031a2fcab08e4b82f16ece36504988dcbd81dbba650d82"
 dependencies = [
  "bytes 0.4.12",
  "futures",
- "log 0.4.17",
+ "log 0.4.22",
  "mio",
  "tokio-codec",
  "tokio-io",
@@ -2222,7 +2215,7 @@ dependencies = [
  "futures",
  "iovec",
  "libc",
- "log 0.4.17",
+ "log 0.4.22",
  "mio",
  "mio-uds",
  "tokio-codec",
@@ -2256,7 +2249,7 @@ dependencies = [
  "futures",
  "idna 0.1.5",
  "lazy_static",
- "log 0.4.17",
+ "log 0.4.22",
  "rand 0.5.6",
  "smallvec",
  "socket2",
@@ -2280,7 +2273,7 @@ dependencies = [
  "futures",
  "idna 0.1.5",
  "lazy_static",
- "log 0.4.17",
+ "log 0.4.22",
  "rand 0.5.6",
  "smallvec",
  "socket2",
@@ -2304,7 +2297,7 @@ dependencies = [
  "futures",
  "ipconfig",
  "lazy_static",
- "log 0.4.17",
+ "log 0.4.22",
  "lru-cache",
  "resolv-conf",
  "smallvec",
@@ -2462,7 +2455,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "95ce90fd5bcc06af55a641a86428ee4229e44e07033963a2290a8e241607ccb9"
 dependencies = [
  "bumpalo",
- "log 0.4.17",
+ "log 0.4.22",
  "once_cell",
  "proc-macro2 1.0.56",
  "quote 1.0.26",
