@@ -4,6 +4,7 @@ use super::privilege_drop::{PrivilegeDropper, PrivilegeDropperReal};
 use crate::bootstrapper::RealUser;
 use crate::entry_dns::dns_socket_server::DnsSocketServer;
 use crate::node_configurator::node_configurator_standard::server_initializer_collected_params;
+use crate::node_configurator::unprivileged_parse_args_configuration::has_user_specified;
 use crate::node_configurator::{DirsWrapper, DirsWrapperReal};
 use crate::run_modes_factories::{RunModeResult, ServerInitializer};
 use crate::sub_lib::socket_server::ConfiguredByPrivilege;
@@ -18,6 +19,7 @@ use log::{log, Level};
 use masq_lib::command::StdStreams;
 use masq_lib::logger;
 use masq_lib::logger::{real_format_function, POINTER_TO_FORMAT_FUNCTION};
+use masq_lib::multi_config::MultiConfig;
 use masq_lib::shared_schema::ConfiguratorError;
 use std::any::Any;
 use std::io;
@@ -33,47 +35,71 @@ pub struct ServerInitializerReal {
     bootstrapper: Box<dyn ConfiguredByPrivilege<Item = (), Error = ()>>,
     privilege_dropper: Box<dyn PrivilegeDropper>,
     dirs_wrapper: Box<dyn DirsWrapper>,
+    is_entry_dns_enabled: bool,
 }
 
 impl ServerInitializer for ServerInitializerReal {
     fn go(&mut self, streams: &mut StdStreams<'_>, args: &[String]) -> RunModeResult {
         let multi_config = server_initializer_collected_params(self.dirs_wrapper.as_ref(), args)?;
+        self.is_entry_dns_enabled = has_user_specified(&multi_config, "entry-dns");
+
+        let privileged_result = self.initialize_privileged(&multi_config);
+        self.drop_privileges(&multi_config);
+        let unprivileged_result = self.initialize_unprivileged(&multi_config, streams);
+
+        privileged_result.combine_results(unprivileged_result)
+    }
+
+    as_any_ref_in_trait_impl!();
+}
+
+impl ServerInitializerReal {
+    fn drop_privileges(&self, multi_config: &MultiConfig) {
         let real_user = value_m!(multi_config, "real-user", RealUser)
             .expect("ServerInitializer: Real user not present in Multi Config");
         let data_directory = value_m!(multi_config, "data-directory", String)
             .expect("ServerInitializer: Data directory not present in Multi Config");
 
-        // TODO: GH-525: This card should bring back the commented out code for dns_socket_server
-        let result: RunModeResult = Ok(())
-            // .combine_results(
-            //     self.dns_socket_server
-            //         .as_mut()
-            //         .initialize_as_privileged(&multi_config),
-            // )
-            .combine_results(
-                self.bootstrapper
-                    .as_mut()
-                    .initialize_as_privileged(&multi_config),
-            );
-
         self.privilege_dropper
             .chown(Path::new(data_directory.as_str()), &real_user);
-
         self.privilege_dropper.drop_privileges(&real_user);
-
-        result
-            // .combine_results(
-            //     self.dns_socket_server
-            //         .as_mut()
-            //         .initialize_as_unprivileged(&multi_config, streams),
-            // )
-            .combine_results(
-                self.bootstrapper
-                    .as_mut()
-                    .initialize_as_unprivileged(&multi_config, streams),
-            )
     }
-    as_any_ref_in_trait_impl!();
+
+    fn initialize_privileged(&mut self, multi_config: &MultiConfig) -> RunModeResult {
+        let result = match self.is_entry_dns_enabled {
+            true => self
+                .dns_socket_server
+                .as_mut()
+                .initialize_as_privileged(multi_config),
+            false => Ok(()),
+        };
+
+        result.combine_results(
+            self.bootstrapper
+                .as_mut()
+                .initialize_as_privileged(multi_config),
+        )
+    }
+
+    fn initialize_unprivileged(
+        &mut self,
+        multi_config: &MultiConfig,
+        streams: &mut StdStreams<'_>,
+    ) -> RunModeResult {
+        let result = match self.is_entry_dns_enabled {
+            true => self
+                .dns_socket_server
+                .as_mut()
+                .initialize_as_unprivileged(multi_config, streams),
+            false => Ok(()),
+        };
+
+        result.combine_results(
+            self.bootstrapper
+                .as_mut()
+                .initialize_as_unprivileged(multi_config, streams),
+        )
+    }
 }
 
 impl Future for ServerInitializerReal {
@@ -81,12 +107,16 @@ impl Future for ServerInitializerReal {
     type Error = ();
 
     fn poll(&mut self) -> Result<Async<<Self as Future>::Item>, <Self as Future>::Error> {
-        // try_ready!(self
-        //     .dns_socket_server
-        //     .as_mut()
-        //     .join(self.bootstrapper.as_mut())
-        //     .poll());
-        try_ready!(self.bootstrapper.as_mut().poll());
+        match self.is_entry_dns_enabled {
+            true => {
+                try_ready!(self
+                    .dns_socket_server
+                    .as_mut()
+                    .join(self.bootstrapper.as_mut())
+                    .poll());
+            }
+            false => try_ready!(self.bootstrapper.as_mut().poll()),
+        }
         Ok(Async::Ready(()))
     }
 }
@@ -98,6 +128,7 @@ impl Default for ServerInitializerReal {
             bootstrapper: Box::new(Bootstrapper::new(Box::new(LoggerInitializerWrapperReal {}))),
             privilege_dropper: Box::new(PrivilegeDropperReal::new()),
             dirs_wrapper: Box::new(DirsWrapperReal::default()),
+            is_entry_dns_enabled: false,
         }
     }
 }
@@ -682,8 +713,64 @@ pub mod tests {
     }
 
     #[test]
+    fn go_updates_entry_dns_flag() {
+        let _ = LogfileNameGuard::new(&PathBuf::from("go_updates_entry_dns_flag"));
+        let dns_socket_server = CrashTestDummy::new(CrashPoint::None, ());
+        let bootstrapper = CrashTestDummy::new(CrashPoint::None, BootstrapperConfig::new());
+        let privilege_dropper = PrivilegeDropperMock::new();
+        let dirs_wrapper = make_pre_populated_mocked_directory_wrapper();
+        let mut subject = ServerInitializerReal {
+            dns_socket_server: Box::new(dns_socket_server),
+            bootstrapper: Box::new(bootstrapper),
+            privilege_dropper: Box::new(privilege_dropper),
+            dirs_wrapper: Box::new(dirs_wrapper),
+            is_entry_dns_enabled: false,
+        };
+
+        let _ = subject.go(
+            &mut StdStreams {
+                stdin: &mut ByteArrayReader::new(&[0; 0]),
+                stdout: &mut ByteArrayWriter::new(),
+                stderr: &mut ByteArrayWriter::new(),
+            },
+            &slice_of_strs_to_vec_of_strings(&["MASQNode", "--entry-dns"]),
+        );
+
+        assert!(subject.is_entry_dns_enabled);
+    }
+
+    #[test]
+    fn go_maintains_entry_dns_flag_disabled_if_absent_in_args() {
+        let _ = LogfileNameGuard::new(&PathBuf::from(
+            "go_maintains_entry_dns_flag_disabled_if_absent_in_args",
+        ));
+        let dns_socket_server = CrashTestDummy::new(CrashPoint::None, ());
+        let bootstrapper = CrashTestDummy::new(CrashPoint::None, BootstrapperConfig::new());
+        let privilege_dropper = PrivilegeDropperMock::new();
+        let dirs_wrapper = make_pre_populated_mocked_directory_wrapper();
+        let mut subject = ServerInitializerReal {
+            dns_socket_server: Box::new(dns_socket_server),
+            bootstrapper: Box::new(bootstrapper),
+            privilege_dropper: Box::new(privilege_dropper),
+            dirs_wrapper: Box::new(dirs_wrapper),
+            is_entry_dns_enabled: false,
+        };
+
+        let _ = subject.go(
+            &mut StdStreams {
+                stdin: &mut ByteArrayReader::new(&[0; 0]),
+                stdout: &mut ByteArrayWriter::new(),
+                stderr: &mut ByteArrayWriter::new(),
+            },
+            &slice_of_strs_to_vec_of_strings(&["MASQNode"]), //  "--entry-dns" is absent
+        );
+
+        assert!(!subject.is_entry_dns_enabled);
+    }
+
+    #[test]
     fn exits_after_all_socket_servers_exit() {
-        let _ = LogfileNameGuard::new(&PathBuf::from("uninitialized"));
+        let _ = LogfileNameGuard::new(&PathBuf::from("exits_after_all_socket_servers_exit"));
         let dns_socket_server = CrashTestDummy::new(CrashPoint::Error, ());
         let bootstrapper = CrashTestDummy::new(CrashPoint::Error, BootstrapperConfig::new());
         let dirs_wrapper = make_pre_populated_mocked_directory_wrapper();
@@ -693,6 +780,7 @@ pub mod tests {
             bootstrapper: Box::new(bootstrapper),
             privilege_dropper: Box::new(privilege_dropper),
             dirs_wrapper: Box::new(dirs_wrapper),
+            is_entry_dns_enabled: false,
         };
         let stdin = &mut ByteArrayReader::new(&[0; 0]);
         let stdout = &mut ByteArrayWriter::new();
@@ -722,6 +810,7 @@ pub mod tests {
             bootstrapper: Box::new(bootstrapper),
             privilege_dropper: Box::new(privilege_dropper),
             dirs_wrapper: Box::new(dirs_wrapper),
+            is_entry_dns_enabled: false,
         };
 
         let result = subject.poll();
@@ -729,8 +818,7 @@ pub mod tests {
     }
 
     #[test]
-    // TODO: GH-525: It should panic
-    // #[should_panic(expected = "EntryDnsServerMock was instructed to panic")]
+    #[should_panic(expected = "EntryDnsServerMock was instructed to panic")]
     fn server_initializer_dns_socket_server_panics() {
         let bootstrapper = CrashTestDummy::new(CrashPoint::None, BootstrapperConfig::new());
         let privilege_dropper = PrivilegeDropperMock::new();
@@ -744,6 +832,7 @@ pub mod tests {
             bootstrapper: Box::new(bootstrapper),
             privilege_dropper: Box::new(privilege_dropper),
             dirs_wrapper: Box::new(dirs_wrapper),
+            is_entry_dns_enabled: true,
         };
 
         let _ = subject.poll();
@@ -763,6 +852,7 @@ pub mod tests {
             )),
             privilege_dropper: Box::new(privilege_dropper),
             dirs_wrapper: Box::new(dirs_wrapper),
+            is_entry_dns_enabled: false,
         };
 
         let _ = subject.poll();
@@ -770,7 +860,7 @@ pub mod tests {
 
     #[test]
     fn go_should_drop_privileges() {
-        let _ = LogfileNameGuard::new(&PathBuf::from("uninitialized"));
+        let _ = LogfileNameGuard::new(&PathBuf::from("go_should_drop_privileges"));
         let bootstrapper_init_privileged_params_arc = Arc::new(Mutex::new(vec![]));
         let bootstrapper_init_unprivileged_params_arc = Arc::new(Mutex::new(vec![]));
         let dns_socket_server_privileged_params_arc = Arc::new(Mutex::new(vec![]));
@@ -812,6 +902,7 @@ pub mod tests {
             bootstrapper: Box::new(bootstrapper),
             privilege_dropper: Box::new(privilege_dropper),
             dirs_wrapper: Box::new(dirs_wrapper),
+            is_entry_dns_enabled: false,
         };
 
         let result = subject.go(
@@ -822,6 +913,7 @@ pub mod tests {
                 "123:456:/home/alice",
                 "--dns-servers",
                 "5.5.6.6",
+                "--entry-dns",
             ]),
         );
 
@@ -844,8 +936,8 @@ pub mod tests {
         [
             bootstrapper_init_privileged_params_arc,
             bootstrapper_init_unprivileged_params_arc,
-            // dns_socket_server_privileged_params_arc, // TODO: GH-525: Fix me
-            // dns_socket_server_unprivileged_params_arc,
+            dns_socket_server_privileged_params_arc,
+            dns_socket_server_unprivileged_params_arc,
         ]
         .iter()
         .for_each(|arc_params| {
@@ -859,7 +951,7 @@ pub mod tests {
 
     #[test]
     fn go_should_combine_errors() {
-        let _ = LogfileNameGuard::new(&PathBuf::from("uninitialized"));
+        let _ = LogfileNameGuard::new(&PathBuf::from("go_should_combine_errors"));
         let dns_socket_server = ConfiguredByPrivilegeMock::default()
             .initialize_as_privileged_result(Err(ConfiguratorError::required(
                 "dns-iap",
@@ -884,23 +976,27 @@ pub mod tests {
             bootstrapper: Box::new(bootstrapper),
             privilege_dropper: Box::new(privilege_dropper),
             dirs_wrapper: Box::new(make_pre_populated_mocked_directory_wrapper()),
+            is_entry_dns_enabled: false,
         };
-        let args =
-            slice_of_strs_to_vec_of_strings(&["MASQNode", "--real-user", "123:123:/home/alice"]);
+        let args = slice_of_strs_to_vec_of_strings(&[
+            "MASQNode",
+            "--real-user",
+            "123:123:/home/alice",
+            "--entry-dns",
+        ]);
         let stderr = ByteArrayWriter::new();
         let mut holder = FakeStreamHolder::new();
         holder.stderr = stderr;
 
         let result = subject.go(&mut holder.streams(), &args);
 
-        // TODO: GH-525: Fix me
         assert_eq!(
             result,
             Err(ConfiguratorError::new(vec![
-                // ParamError::new("dns-iap", "dns-iap-reason"),
+                ParamError::new("dns-iap", "dns-iap-reason"),
                 ParamError::new("boot-iap", "boot-iap-reason"),
-                // ParamError::new("dns-iau", "dns-iau-reason"),
-                ParamError::new("boot-iau", "boot-iau-reason")
+                ParamError::new("dns-iau", "dns-iau-reason"),
+                ParamError::new("boot-iau", "boot-iau-reason"),
             ]))
         );
     }

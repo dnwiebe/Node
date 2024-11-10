@@ -37,7 +37,7 @@ pub trait UnprivilegedParseArgsConfiguration {
         unprivileged_config
             .blockchain_bridge_config
             .blockchain_service_url_opt =
-            if is_user_specified(multi_config, "blockchain-service-url") {
+            if has_user_specified(multi_config, "blockchain-service-url") {
                 value_m!(multi_config, "blockchain-service-url", String)
             } else {
                 match persistent_config.blockchain_service_url() {
@@ -48,7 +48,7 @@ pub trait UnprivilegedParseArgsConfiguration {
             };
         unprivileged_config.clandestine_port_opt = value_m!(multi_config, "clandestine-port", u16);
         unprivileged_config.blockchain_bridge_config.gas_price =
-            if is_user_specified(multi_config, "gas-price") {
+            if has_user_specified(multi_config, "gas-price") {
                 value_m!(multi_config, "gas-price", u64).expectv("gas price")
             } else {
                 match persistent_config.gas_price() {
@@ -614,7 +614,7 @@ fn set_db_password_at_first_mention(
     }
 }
 
-fn is_user_specified(multi_config: &MultiConfig, parameter: &str) -> bool {
+pub fn has_user_specified(multi_config: &MultiConfig, parameter: &str) -> bool {
     multi_config.occurrences_of(parameter) > 0
 }
 

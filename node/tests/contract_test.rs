@@ -143,6 +143,7 @@ fn masq_erc20_contract_exists_on_ethereum_mainnet_integration() {
 #[test]
 fn masq_erc20_contract_exists_on_base_mainnet_integration() {
     let blockchain_urls = vec![
+        "https://base.rpc.subquery.network/public",
         "https://base-rpc.publicnode.com",
         "https://base.drpc.org",
         "https://base-pokt.nodies.app",

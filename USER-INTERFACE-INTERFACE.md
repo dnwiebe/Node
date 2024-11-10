@@ -1143,6 +1143,7 @@ be cleared.
 * `db-password` - Password to unlock the sensitive values in the database.
 * `dns-servers` - Comma-separated list of DNS servers to use.
 * `earning-wallet` - Wallet into which earnings should be deposited.
+* `entry-dns` - To start MASQ's local DNS server if HTTP proxying is unavailable.
 * `gas-price` - The fee per unit of computational effort in blockchain transactions, measured in gwei.
 * `ip` - The public IP address of the Node.
 * `log-level` - The lowest level of logs that should be recorded. `off`, `error`, `warn`, `info`, `debug`, `trace`

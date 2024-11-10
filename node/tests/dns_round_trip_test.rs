@@ -1,6 +1,7 @@
 // Copyright (c) 2019, MASQ (https://masq.ai) and/or its affiliates. All rights reserved.
 
 pub mod utils;
+use crate::utils::CommandConfig;
 use node_lib::entry_dns::packet_facade::PacketFacade;
 use serial_test_derive::serial;
 use std::net::UdpSocket;
@@ -9,13 +10,11 @@ use trust_dns::op::{OpCode, ResponseCode};
 use trust_dns::rr::{DNSClass, RecordType};
 
 #[test]
-// TODO This ignore should be lifted by GH-525
-#[ignore]
 #[serial(port53)]
 fn handles_two_consecutive_ipv4_dns_requests_integration() {
     let _node = utils::MASQNode::start_standard(
         "handles_two_consecutive_ipv4_dns_requests_integration",
-        None,
+        Some(CommandConfig::new().opt("--entry-dns")),
         true,
         true,
         false,
@@ -27,13 +26,11 @@ fn handles_two_consecutive_ipv4_dns_requests_integration() {
 }
 
 #[test]
-// TODO This ignore should be lifted by GH-525
-#[ignore]
 #[serial(port53)]
 fn handles_consecutive_heterogeneous_dns_requests_integration() {
     let _node = utils::MASQNode::start_standard(
         "handles_consecutive_heterogeneous_dns_requests_integration",
-        None,
+        Some(CommandConfig::new().opt("--entry-dns")),
         true,
         true,
         false,
