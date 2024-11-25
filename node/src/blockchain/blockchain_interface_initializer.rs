@@ -63,7 +63,7 @@ mod tests {
     fn initialize_web3_interface_works() {
         let port = find_free_port();
         let _blockchain_client_server = MBCSBuilder::new(port)
-            .response("0x3B9ACA00".to_string(), 0)
+            .response("0x3B9ACA00".to_string(), 0) // gas_price = 10000000000
             .response("0xFF40".to_string(), 0)
             .response(
                 "0x000000000000000000000000000000000000000000000000000000000000FFFF".to_string(),
@@ -84,7 +84,10 @@ mod tests {
             .unwrap();
 
         assert_eq!(blockchain_agent.consuming_wallet(), &wallet);
-        assert_eq!(blockchain_agent.agreed_fee_per_computation_unit(), 2);
+        assert_eq!(
+            blockchain_agent.agreed_fee_per_computation_unit(),
+            1_000_000_000
+        );
     }
 
     #[test]

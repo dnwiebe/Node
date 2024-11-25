@@ -18,11 +18,11 @@ use crate::accountant::scanners::scanners_utils::payable_scanner_utils::{
     PayableThresholdsGaugeReal, PayableTransactingErrorEnum, PendingPayableMetadata,
 };
 use crate::accountant::scanners::scanners_utils::pending_payable_scanner_utils::{
-    elapsed_in_ms, handle_none_status, handle_status_with_failure, handle_status_with_success,
+    elapsed_in_ms, handle_status_with_failure, handle_status_with_success,
     PendingPayableScanReport,
 };
 use crate::accountant::scanners::scanners_utils::receivable_scanner_utils::balance_and_age;
-use crate::accountant::{PaymentsAndStartBlock, PendingPayableId, ReceivedPaymentsError};
+use crate::accountant::{PaymentsAndStartBlock, PendingPayableId};
 use crate::accountant::{
     comma_joined_stringifiable, gwei_to_wei, Accountant, ReceivedPayments,
     ReportTransactionReceipts, RequestTransactionReceipts, ResponseSkeleton, ScanForPayables,
@@ -51,7 +51,7 @@ use std::rc::Rc;
 use std::time::{Duration, SystemTime};
 use time::format_description::parse;
 use time::OffsetDateTime;
-use web3::types::{TransactionReceipt, H256};
+use web3::types::H256;
 use masq_lib::type_obfuscation::Obfuscated;
 use crate::accountant::scanners::mid_scan_msg_handling::payable_scanner::{PreparedAdjustment, MultistagePayableScanner, SolvencySensitivePaymentInstructor};
 use crate::accountant::scanners::mid_scan_msg_handling::payable_scanner::msgs::{BlockchainAgentWithContextMessage, QualifiedPayablesMessage};
@@ -497,7 +497,7 @@ impl PayableScanner {
     ) {
         if let Some(err) = err_opt {
             match err {
-                LocallyCausedError(PayableTransactionError::Sending {hashes, ..})
+                LocallyCausedError(PayableTransactionError::Sending { hashes, .. })
                 | RemotelyCausedErrors(hashes) => {
                     self.discard_failed_transactions_with_possible_fingerprints(hashes, logger)
                 }
@@ -654,6 +654,8 @@ impl PendingPayableScanner {
         msg: ReportTransactionReceipts,
         logger: &Logger,
     ) -> PendingPayableScanReport {
+        // TODO: We want to ensure that failed transactions are not marked still pending,
+        // and also adjust log levels accordingly.
         fn handle_none_receipt(
             mut scan_report: PendingPayableScanReport,
             payable: PendingPayableFingerprint,
@@ -675,12 +677,12 @@ impl PendingPayableScanner {
         msg.fingerprints_with_receipts.into_iter().fold(
             scan_report,
             |scan_report_so_far, (receipt_result, fingerprint)| match receipt_result {
-                TransactionReceiptResult::Found(receipt) => self.interpret_transaction_receipt(
-                    scan_report_so_far,
-                    &receipt,
-                    fingerprint,
-                    logger,
-                ),
+                TransactionReceiptResult::Found(_receipt) => {
+                    handle_status_with_success(scan_report_so_far, fingerprint, logger)
+                }
+                TransactionReceiptResult::TransactionFailed(_receipt) => {
+                    handle_status_with_failure(scan_report_so_far, fingerprint, logger)
+                }
                 TransactionReceiptResult::NotPresent => handle_none_receipt(
                     scan_report_so_far,
                     fingerprint,
@@ -695,41 +697,6 @@ impl PendingPayableScanner {
                 ),
             },
         )
-    }
-
-    fn interpret_transaction_receipt(
-        &self,
-        scan_report: PendingPayableScanReport,
-        receipt: &TransactionReceipt,
-        fingerprint: PendingPayableFingerprint,
-        logger: &Logger,
-    ) -> PendingPayableScanReport {
-        const WEB3_SUCCESS: u64 = 1;
-        const WEB3_FAILURE: u64 = 0;
-
-        match receipt.status {
-            None => handle_none_status(
-                scan_report,
-                fingerprint,
-                self.when_pending_too_long_sec,
-                logger,
-            ),
-            Some(status_code) => {
-                let code = status_code.as_u64();
-                //TODO: failures handling is going to need enhancement suggested by GH-693
-                if code == WEB3_FAILURE {
-                    handle_status_with_failure(scan_report, fingerprint, logger)
-                } else if code == WEB3_SUCCESS {
-                    handle_status_with_success(scan_report, fingerprint, logger)
-                } else {
-                    unreachable!(
-                        "tx receipt for pending {:?}: status code other than 0 or 1 \
-                        shouldn't be possible, but was {}",
-                        fingerprint.hash, code
-                    )
-                }
-            }
-        }
     }
 
     fn process_transactions_by_reported_state(
@@ -866,33 +833,7 @@ impl Scanner<RetrieveTransactions, ReceivedPayments> for ReceivableScanner {
     }
 
     fn finish_scan(&mut self, msg: ReceivedPayments, logger: &Logger) -> Option<NodeToUiMessage> {
-        match msg.scan_result {
-            Ok(payments_and_start_block) => {
-                self.handle_new_received_payments(&payments_and_start_block, msg.timestamp, logger);
-            }
-            Err(e) => match e {
-                ReceivedPaymentsError::ExceededBlockScanLimit(max_block_count) => {
-                    debug!(logger, "Writing max_block_count({})", max_block_count);
-                    self.persistent_configuration
-                        .set_max_block_count(Some(max_block_count))
-                        .map_or_else(|_| {
-                            warning!(logger, "{:?} update max_block_count to {}. Scheduling next scan with that limit.", e, max_block_count);
-                        },
-                        |e| {
-                            warning!(logger, "Writing max_block_count failed: {:?}", e);
-                        },
-                    )
-                }
-                ReceivedPaymentsError::OtherRPCError(rpc_error) => {
-                    warning!(
-                        logger,
-                        "Attempted to retrieve received payments but failed: {:?}",
-                        rpc_error
-                    );
-                }
-            },
-        }
-
+        self.handle_new_received_payments(&msg.payments_and_start_block, msg.timestamp, logger);
         self.mark_as_ended(logger);
         msg.response_skeleton_opt
             .map(|response_skeleton| NodeToUiMessage {
@@ -946,7 +887,6 @@ impl ReceivableScanner {
                     new_start_block, e
                 ),
             }
-            debug!(logger, "Updated start block to: {}", new_start_block)
         } else {
             let mut txn = self
                 .receivable_dao
@@ -1148,7 +1088,7 @@ mod tests {
     use crate::accountant::db_access_objects::utils::{from_time_t, to_time_t};
     use crate::accountant::scanners::mid_scan_msg_handling::payable_scanner::msgs::QualifiedPayablesMessage;
     use crate::accountant::scanners::scanners_utils::payable_scanner_utils::PendingPayableMetadata;
-    use crate::accountant::scanners::scanners_utils::pending_payable_scanner_utils::PendingPayableScanReport;
+    use crate::accountant::scanners::scanners_utils::pending_payable_scanner_utils::{handle_none_status, handle_status_with_failure, PendingPayableScanReport};
     use crate::accountant::scanners::test_utils::{
         make_empty_payments_and_start_block, protect_payables_in_test,
     };
@@ -1174,7 +1114,7 @@ mod tests {
     use crate::database::rusqlite_wrappers::TransactionSafeWrapper;
     use crate::database::test_utils::transaction_wrapper_mock::TransactionInnerWrapperMockBuilder;
     use crate::db_config::mocks::ConfigDaoMock;
-    use crate::db_config::persistent_configuration::PersistentConfigError;
+    use crate::db_config::persistent_configuration::{PersistentConfigError};
     use crate::sub_lib::accountant::{
         DaoFactories, FinancialStatistics, PaymentThresholds, ScanIntervals,
         DEFAULT_PAYMENT_THRESHOLDS,
@@ -1863,7 +1803,7 @@ mod tests {
             &format!("WARN: {test_name}: \
             Deleting fingerprints for failed transactions 0x00000000000000000000000000000000000000000000000000000000000015b3, \
             0x0000000000000000000000000000000000000000000000000000000000003039",
-        ));
+            ));
         // we haven't supplied any result for mark_pending_payable() and so it's proved uncalled
     }
 
@@ -2371,11 +2311,7 @@ mod tests {
         hash: H256,
     ) -> PendingPayableScanReport {
         init_test_logging();
-        let tx_receipt = TransactionReceipt::default(); //status defaulted to None
         let when_sent = SystemTime::now().sub(Duration::from_secs(pending_payable_age_sec));
-        let subject = PendingPayableScannerBuilder::new()
-            .when_pending_too_long_sec(when_pending_too_long_sec)
-            .build();
         let fingerprint = PendingPayableFingerprint {
             rowid,
             timestamp: when_sent,
@@ -2387,7 +2323,7 @@ mod tests {
         let logger = Logger::new(test_name);
         let scan_report = PendingPayableScanReport::default();
 
-        subject.interpret_transaction_receipt(scan_report, &tx_receipt, fingerprint, &logger)
+        handle_none_status(scan_report, fingerprint, when_pending_too_long_sec, &logger)
     }
 
     fn assert_log_msg_and_elapsed_time_in_log_makes_sense(
@@ -2451,7 +2387,7 @@ mod tests {
             00000000000000000000000237 has exceeded the maximum pending time \\({}sec\\) with the age \
             \\d+sec and the confirmation process is going to be aborted now at the final attempt 1; manual \
             resolution is required from the user to complete the transaction"
-            ,test_name, DEFAULT_PENDING_TOO_LONG_SEC, ),elapsed_after,capture_regex)
+            , test_name, DEFAULT_PENDING_TOO_LONG_SEC, ), elapsed_after, capture_regex)
     }
 
     #[test]
@@ -2479,7 +2415,7 @@ mod tests {
             }
         );
         let capture_regex = r#"\s(\d+)ms"#;
-        assert_log_msg_and_elapsed_time_in_log_makes_sense (&format!(
+        assert_log_msg_and_elapsed_time_in_log_makes_sense(&format!(
             "INFO: {test_name}: Pending transaction 0x0000000000000000000000000000000000000000000000000\
             00000000000007b couldn't be confirmed at attempt 1 at \\d+ms after its sending"), elapsed_after_ms, capture_regex);
     }
@@ -2516,28 +2452,9 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(
-        expected = "tx receipt for pending 0x000000000000000000000000000000000000000000000000000000000000007b: \
-         status code other than 0 or 1 shouldn't be possible, but was 456"
-    )]
-    fn interpret_transaction_receipt_panics_at_undefined_status_code() {
-        let mut tx_receipt = TransactionReceipt::default();
-        tx_receipt.status = Some(U64::from(456));
-        let mut fingerprint = make_pending_payable_fingerprint();
-        fingerprint.hash = make_tx_hash(0x7b);
-        let subject = PendingPayableScannerBuilder::new().build();
-        let scan_report = PendingPayableScanReport::default();
-        let logger = Logger::new("test");
-
-        let _ =
-            subject.interpret_transaction_receipt(scan_report, &tx_receipt, fingerprint, &logger);
-    }
-
-    #[test]
     fn interpret_transaction_receipt_when_transaction_status_is_a_failure() {
         init_test_logging();
         let test_name = "interpret_transaction_receipt_when_transaction_status_is_a_failure";
-        let subject = PendingPayableScannerBuilder::new().build();
         let mut tx_receipt = TransactionReceipt::default();
         tx_receipt.status = Some(U64::from(0)); //failure
         let hash = make_tx_hash(0xd7);
@@ -2552,8 +2469,7 @@ mod tests {
         let logger = Logger::new(test_name);
         let scan_report = PendingPayableScanReport::default();
 
-        let result =
-            subject.interpret_transaction_receipt(scan_report, &tx_receipt, fingerprint, &logger);
+        let result = handle_status_with_failure(scan_report, fingerprint, &logger);
 
         assert_eq!(
             result,
@@ -3125,7 +3041,7 @@ mod tests {
     #[test]
     fn receivable_scanner_handles_no_new_payments_found() {
         init_test_logging();
-        let test_name = "receivable_scanner_aborts_scan_if_no_payments_were_supplied";
+        let test_name = "receivable_scanner_handles_no_new_payments_found";
         let set_start_block_params_arc = Arc::new(Mutex::new(vec![]));
         let new_start_block = 4321;
         let persistent_config = PersistentConfigurationMock::new()
@@ -3134,11 +3050,11 @@ mod tests {
         let mut subject = ReceivableScannerBuilder::new()
             .persistent_configuration(persistent_config)
             .build();
-        let mut scan_result = make_empty_payments_and_start_block();
-        scan_result.new_start_block = new_start_block;
+        let mut payments_and_start_block = make_empty_payments_and_start_block();
+        payments_and_start_block.new_start_block = new_start_block;
         let msg = ReceivedPayments {
             timestamp: SystemTime::now(),
-            scan_result: Ok(scan_result),
+            payments_and_start_block,
             response_skeleton_opt: None,
         };
 
@@ -3165,11 +3081,11 @@ mod tests {
         let mut subject = ReceivableScannerBuilder::new()
             .persistent_configuration(persistent_config)
             .build();
-        let mut scan_result = make_empty_payments_and_start_block();
-        scan_result.new_start_block = 6709;
+        let mut payments_and_start_block = make_empty_payments_and_start_block();
+        payments_and_start_block.new_start_block = 6709;
         let msg = ReceivedPayments {
             timestamp: now,
-            scan_result: Ok(scan_result),
+            payments_and_start_block,
             response_skeleton_opt: None,
         };
 
@@ -3218,12 +3134,12 @@ mod tests {
                 wei_amount: 3_333_345,
             },
         ];
-        let mut scan_result = make_empty_payments_and_start_block();
-        scan_result.new_start_block = 7890123;
-        scan_result.payments = receivables.clone();
+        let mut payments_and_start_block = make_empty_payments_and_start_block();
+        payments_and_start_block.new_start_block = 7890123;
+        payments_and_start_block.payments = receivables.clone();
         let msg = ReceivedPayments {
             timestamp: now,
-            scan_result: Ok(scan_result),
+            payments_and_start_block,
             response_skeleton_opt: None,
         };
         subject.mark_as_started(SystemTime::now());
@@ -3275,10 +3191,10 @@ mod tests {
         }];
         let msg = ReceivedPayments {
             timestamp: now,
-            scan_result: Ok(PaymentsAndStartBlock {
+            payments_and_start_block: PaymentsAndStartBlock {
                 payments: receivables,
                 new_start_block: 7890123,
-            }),
+            },
             response_skeleton_opt: None,
         };
         // Not necessary, rather for preciseness
@@ -3318,11 +3234,11 @@ mod tests {
             from: make_wallet("abc"),
             wei_amount: 45_780,
         }];
-        let mut scan_result = make_empty_payments_and_start_block();
-        scan_result.payments = receivables;
+        let mut payments_and_start_block = make_empty_payments_and_start_block();
+        payments_and_start_block.payments = receivables;
         let msg = ReceivedPayments {
             timestamp: now,
-            scan_result: Ok(scan_result),
+            payments_and_start_block,
             response_skeleton_opt: None,
         };
         // Not necessary, rather for preciseness

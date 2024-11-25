@@ -116,7 +116,7 @@ fn handles_startup_and_shutdown_integration() {
         "--data-directory",
         dir_path.to_str().unwrap(),
         "--blockchain-service-url",
-        "https://example.com",
+        "https://nonexistentblockchainservice.com",
     ]);
 
     let (stdout, stderr, exit_code) = masq_handle.stop();

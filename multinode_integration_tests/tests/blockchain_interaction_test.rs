@@ -59,7 +59,7 @@ fn debtors_are_credited_once_but_not_twice() {
             }],
             1,
         )
-        .run_on_docker()
+        .run_in_docker()
         .start();
     // Start a real Node pointing at the mock blockchain client with a start block of 1000
     let node_config = NodeStartupConfigBuilder::standard()
@@ -144,7 +144,7 @@ fn debtors_are_credited_once_but_not_twice() {
         let config_dao = config_dao(&node_name);
         assert_eq!(
             config_dao.get("start_block").unwrap().value_opt.unwrap(),
-            "2001"
+            "2000"
         );
     }
 }

@@ -81,7 +81,6 @@ pub enum BlockchainAgentBuildError {
     GasPrice(BlockchainError),
     TransactionFeeBalance(Address, BlockchainError),
     ServiceFeeBalance(Address, BlockchainError),
-    TransactionID(Address, BlockchainError),
     UninitializedBlockchainInterface,
 }
 
@@ -97,10 +96,6 @@ impl Display for BlockchainAgentBuildError {
             )),
             Self::ServiceFeeBalance(address, blockchain_e) => Either::Left(format!(
                 "masq balance for our earning wallet {:#x} due to {}",
-                address, blockchain_e
-            )),
-            Self::TransactionID(address, blockchain_e) => Either::Left(format!(
-                "transaction id for our earning wallet {:#x} due to {}",
                 address, blockchain_e
             )),
             Self::UninitializedBlockchainInterface => {
@@ -227,7 +222,6 @@ mod tests {
                 wallet.address(),
                 BlockchainError::InvalidAddress,
             ),
-            BlockchainAgentBuildError::TransactionID(wallet.address(), BlockchainError::InvalidUrl),
             BlockchainAgentBuildError::UninitializedBlockchainInterface,
         ];
 
@@ -246,8 +240,6 @@ mod tests {
                 wallet 0x0000000000000000000000000000000000616263 due to: Blockchain error: Invalid response",
                 "Blockchain agent construction failed at fetching masq balance for our earning wallet \
                 0x0000000000000000000000000000000000616263 due to Blockchain error: Invalid address",
-                "Blockchain agent construction failed at fetching transaction id for our earning wallet \
-                0x0000000000000000000000000000000000616263 due to Blockchain error: Invalid url",
                 BLOCKCHAIN_SERVICE_URL_NOT_SPECIFIED
             ])
         )

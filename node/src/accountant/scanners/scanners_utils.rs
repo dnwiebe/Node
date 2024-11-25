@@ -383,6 +383,7 @@ pub mod pending_payable_scanner_utils {
         scan_report
     }
 
+    //TODO: failures handling is going to need enhancement suggested by GH-693
     pub fn handle_status_with_failure(
         mut scan_report: PendingPayableScanReport,
         fingerprint: PendingPayableFingerprint,

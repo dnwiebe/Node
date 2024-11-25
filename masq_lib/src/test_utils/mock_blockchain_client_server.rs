@@ -24,7 +24,7 @@ lazy_static! {
 
 pub struct MBCSBuilder {
     port: u16,
-    run_on_docker: bool,
+    run_in_docker: bool,
     response_batch_opt: Option<Vec<String>>,
     responses: Vec<String>,
     notifier: Sender<()>,
@@ -34,15 +34,15 @@ impl MBCSBuilder {
     pub fn new(port: u16) -> Self {
         Self {
             port,
-            run_on_docker: false,
+            run_in_docker: false,
             response_batch_opt: None,
             responses: vec![],
             notifier: unbounded().0,
         }
     }
 
-    pub fn run_on_docker(mut self) -> Self {
-        self.run_on_docker = true;
+    pub fn run_in_docker(mut self) -> Self {
+        self.run_in_docker = true;
         self
     }
 
@@ -112,7 +112,7 @@ impl MBCSBuilder {
     pub fn start(self) -> MockBlockchainClientServer {
         let requests = Arc::new(Mutex::new(vec![]));
         let mut server = MockBlockchainClientServer {
-            port_or_local_addr: if self.run_on_docker {
+            port_or_local_addr: if self.run_in_docker {
                 Right(SocketAddr::V4(SocketAddrV4::new(
                     Ipv4Addr::new(172, 18, 0, 1),
                     self.port,
@@ -413,4 +413,5 @@ struct ConnectionState {
     request_accumulator: String,
 }
 
-// Test for this are located: multinode_integration_tests/src/mock_blockchain_client_server.rs
+// TODO GH-805
+// Tests for this are located: multinode_integration_tests/src/mock_blockchain_client_server.rs

@@ -128,7 +128,7 @@ impl Wallet {
             WalletKind::Address(address) => H160(address.0),
             WalletKind::PublicKey(public) => H160(*public.address()),
             WalletKind::SecretKey(key_provider) => key_provider.address(),
-            WalletKind::Uninitialized => panic!("No address for an uninitialized wallet!"),
+            WalletKind::Uninitialized => panic!("No address for an uninitialized wallet!"), // TODO: If we can get rid of it, it'll be awesome!
         }
     }
 

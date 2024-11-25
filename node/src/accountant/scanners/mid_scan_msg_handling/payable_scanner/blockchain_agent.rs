@@ -3,7 +3,6 @@
 use crate::arbitrary_id_stamp_in_trait;
 use crate::sub_lib::blockchain_bridge::ConsumingWalletBalances;
 use crate::sub_lib::wallet::Wallet;
-use web3::types::U256;
 
 // Table of chains by
 //
@@ -24,9 +23,8 @@ use web3::types::U256;
 pub trait BlockchainAgent: Send {
     fn estimated_transaction_fee_total(&self, number_of_transactions: usize) -> u128;
     fn consuming_wallet_balances(&self) -> ConsumingWalletBalances;
-    fn agreed_fee_per_computation_unit(&self) -> u64;
+    fn agreed_fee_per_computation_unit(&self) -> u128;
     fn consuming_wallet(&self) -> &Wallet;
-    fn pending_transaction_id(&self) -> U256;
 
     #[cfg(test)]
     fn dup(&self) -> Box<dyn BlockchainAgent> {

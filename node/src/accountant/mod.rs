@@ -137,7 +137,7 @@ pub struct ReceivedPayments {
     // detects any upcoming delinquency later than the more accurate version would. Is this
     // a problem? Do we want to correct the timestamp? Discuss.
     pub timestamp: SystemTime,
-    pub scan_result: Result<PaymentsAndStartBlock, ReceivedPaymentsError>,
+    pub payments_and_start_block: PaymentsAndStartBlock,
     pub response_skeleton_opt: Option<ResponseSkeleton>,
 }
 
@@ -501,9 +501,9 @@ impl Accountant {
         if !self.our_wallet(wallet) {
             match self.receivable_dao
                 .as_ref()
-                .more_money_receivable(timestamp,wallet, total_charge) {
+                .more_money_receivable(timestamp, wallet, total_charge) {
                 Ok(_) => (),
-                Err(ReceivableDaoError::SignConversion(_)) => error! (
+                Err(ReceivableDaoError::SignConversion(_)) => error!(
                     self.logger,
                     "Overflow error recording service provided for {}: service rate {}, byte rate {}, payload size {}. Skipping",
                     wallet,
@@ -511,7 +511,7 @@ impl Accountant {
                     byte_rate,
                     payload_size
                 ),
-                Err(e)=> panic!("Recording services provided for {} but has hit fatal database error: {:?}", wallet, e)
+                Err(e) => panic!("Recording services provided for {} but has hit fatal database error: {:?}", wallet, e)
             };
         } else {
             warning!(
@@ -535,9 +535,9 @@ impl Accountant {
         if !self.our_wallet(wallet) {
             match self.payable_dao
                 .as_ref()
-                .more_money_payable(timestamp, wallet,total_charge){
+                .more_money_payable(timestamp, wallet, total_charge) {
                 Ok(_) => (),
-                Err(PayableDaoError::SignConversion(_)) => error! (
+                Err(PayableDaoError::SignConversion(_)) => error!(
                     self.logger,
                     "Overflow error recording consumed services from {}: total charge {}, service rate {}, byte rate {}, payload size {}. Skipping",
                     wallet,
@@ -1404,7 +1404,7 @@ mod tests {
         subject_addr.try_send(BindMessage { peer_actors }).unwrap();
         let received_payments = ReceivedPayments {
             timestamp: SystemTime::now(),
-            scan_result: Ok(make_empty_payments_and_start_block()),
+            payments_and_start_block: make_empty_payments_and_start_block(),
             response_skeleton_opt: Some(ResponseSkeleton {
                 client_id: 1234,
                 context_id: 4321,
@@ -1597,6 +1597,10 @@ mod tests {
                 context_id: 4321,
             })
         );
+        assert_eq!(
+            payments_instructions.agent.arbitrary_id_stamp(),
+            agent_id_stamp
+        );
         assert_eq!(blockchain_bridge_recording.len(), 1);
         test_use_of_the_same_logger(&logger_clone, test_name)
         // adjust_payments() did not need a prepared result which means it wasn't reached
@@ -1709,6 +1713,10 @@ mod tests {
         let blockchain_bridge_recording = blockchain_bridge_recording_arc.lock().unwrap();
         let payments_instructions =
             blockchain_bridge_recording.get_record::<OutboundPaymentsInstructions>(0);
+        assert_eq!(
+            payments_instructions.agent.arbitrary_id_stamp(),
+            agent_id_stamp_second_phase
+        );
         assert_eq!(
             payments_instructions.affordable_accounts,
             affordable_accounts
@@ -2039,13 +2047,14 @@ mod tests {
             .build();
         let system = System::new("accountant_uses_receivables_dao_to_process_received_payments");
         let subject = accountant.start();
-        let mut scan_result = make_empty_payments_and_start_block();
-        scan_result.payments = vec![expected_receivable_1.clone(), expected_receivable_2.clone()];
-        scan_result.new_start_block = 123456789;
+        let mut payments_and_start_block = make_empty_payments_and_start_block();
+        payments_and_start_block.payments =
+            vec![expected_receivable_1.clone(), expected_receivable_2.clone()];
+        payments_and_start_block.new_start_block = 123456789;
         subject
             .try_send(ReceivedPayments {
                 timestamp: now,
-                scan_result: Ok(scan_result),
+                payments_and_start_block,
                 response_skeleton_opt: None,
             })
             .expect("unexpected actix error");
@@ -3431,10 +3440,10 @@ mod tests {
         init_test_logging();
         let port = find_free_port();
         let pending_tx_hash_1 =
-            H256::from_str("d89f74084be2601c816fb85b8eac6541437223ad4851d12e9eb3d6f74570b8ae")
+            H256::from_str("e66814b2812a80d619813f51aa999c0df84eb79d10f4923b2b7667b30d6b33d3")
                 .unwrap();
         let pending_tx_hash_2 =
-            H256::from_str("05981aa8d6c8ca1661f56a42e6e0c1aa56c9c9d0ecf26755b4388826aad55811")
+            H256::from_str("0288ef000581b3bca8a2017eac9aea696366f8f1b7437f18d1aad57bccb7032c")
                 .unwrap();
         let _blockchain_client_server = MBCSBuilder::new(port)
             // Blockchain Agent Gas Price
@@ -3446,10 +3455,6 @@ mod tests {
                 "0x000000000000000000000000000000000000000000000000000000000000FFFF".to_string(),
                 0,
             )
-            // Blockchain Agent tx_id
-            .response("0x2".to_string(), 1)
-            // gas_price
-            .response("0x3B9ACA00".to_string(), 1)
             // Submit payments to blockchain
             .response("0xFFF0".to_string(), 1)
             .begin_batch()
@@ -3510,7 +3515,6 @@ mod tests {
             )
             .end_batch()
             .start();
-
         let non_pending_payables_params_arc = Arc::new(Mutex::new(vec![]));
         let mark_pending_payable_params_arc = Arc::new(Mutex::new(vec![]));
         let return_all_errorless_fingerprints_params_arc = Arc::new(Mutex::new(vec![]));
@@ -3538,7 +3542,7 @@ mod tests {
             gwei_to_wei(DEFAULT_PAYMENT_THRESHOLDS.debt_threshold_gwei + 666);
         let wallet_account_1 = make_wallet("creditor1");
         let wallet_account_2 = make_wallet("creditor2");
-        let blockchain_interface = make_blockchain_interface_web3(Some(port));
+        let blockchain_interface = make_blockchain_interface_web3(port);
         let consuming_wallet = make_paying_wallet(b"wallet");
         let system = System::new("pending_transaction");
         let persistent_config_id_stamp = ArbitraryIdStamp::new();
@@ -3546,7 +3550,7 @@ mod tests {
             .set_arbitrary_id_stamp(persistent_config_id_stamp);
         let blockchain_bridge = BlockchainBridge::new(
             Box::new(blockchain_interface),
-            Box::new(persistent_config),
+            Arc::new(Mutex::new(persistent_config)),
             false,
         );
         let account_1 = PayableAccount {
@@ -3628,8 +3632,6 @@ mod tests {
                 no_rowid_results: vec![],
             });
         let mut pending_payable_dao_for_pending_payable_scanner = PendingPayableDaoMock::new()
-            .insert_fingerprints_result(Ok(()))
-            .insert_fingerprints_result(Ok(()))
             .return_all_errorless_fingerprints_params(&return_all_errorless_fingerprints_params_arc)
             .return_all_errorless_fingerprints_result(vec![])
             .return_all_errorless_fingerprints_result(vec![
@@ -3706,9 +3708,7 @@ mod tests {
 
         assert_eq!(system.run(), 0);
         let mut mark_pending_payable_params = mark_pending_payable_params_arc.lock().unwrap();
-
         let mut one_set_of_mark_pending_payable_params = mark_pending_payable_params.remove(0);
-
         assert!(mark_pending_payable_params.is_empty());
         let first_payable = one_set_of_mark_pending_payable_params.remove(0);
         assert_eq!(first_payable.0, wallet_account_1);
@@ -3733,7 +3733,7 @@ mod tests {
             vec![
                 vec![rowid_for_account_1, rowid_for_account_2],
                 vec![rowid_for_account_1, rowid_for_account_2],
-                vec![rowid_for_account_2]
+                vec![rowid_for_account_2],
             ]
         );
         let mark_failure_params = mark_failure_params_arc.lock().unwrap();
@@ -3771,16 +3771,16 @@ mod tests {
         );
         let log_handler = TestLogHandler::new();
         log_handler.exists_log_containing(
-                "WARN: Accountant: Broken transactions 0xd89f74084be2601c816fb85b8eac6541437223ad4\
-                851d12e9eb3d6f74570b8ae marked as an error. You should take over the care of those to make sure \
+            "WARN: Accountant: Broken transactions 0xe66814b2812a80d619813f51aa999c0df84eb79d10f\
+            4923b2b7667b30d6b33d3 marked as an error. You should take over the care of those to make sure \
                 your debts are going to be settled properly. At the moment, there is no automated process \
                 fixing that without your assistance");
-        log_handler.exists_log_matching("INFO: Accountant: Transaction 0x05981aa8d6c8ca1661f56a42e6e\
-        0c1aa56c9c9d0ecf26755b4388826aad55811 has been added to the blockchain; detected locally at \
+        log_handler.exists_log_matching("INFO: Accountant: Transaction 0x0288ef000581b3bca8a2017eac9\
+        aea696366f8f1b7437f18d1aad57bccb7032c has been added to the blockchain; detected locally at \
             attempt 4 at \\d{2,}ms after its sending");
         log_handler.exists_log_containing(
-            "INFO: Accountant: Transactions 0x05981aa8d6c8ca1661f56a42e6e0c1aa56c9c9d0e\
-            cf26755b4388826aad55811 completed their confirmation process succeeding",
+            "INFO: Accountant: Transactions 0x0288ef000581b3bca8a2017eac9aea696366f8f1b7437f18d1aad5\
+            7bccb7032c completed their confirmation process succeeding",
         );
     }
 
@@ -3864,7 +3864,6 @@ mod tests {
         let amount_1 = 12345;
         let hash_2 = make_tx_hash(0x1b207);
         let amount_2 = 87654;
-
         let hash_and_amount_1 = HashAndAmount {
             hash: hash_1,
             amount: amount_1,
@@ -3873,7 +3872,6 @@ mod tests {
             hash: hash_2,
             amount: amount_2,
         };
-
         let init_params = vec![hash_and_amount_1, hash_and_amount_2];
         let init_fingerprints_msg = PendingPayableFingerprintSeeds {
             batch_wide_timestamp: timestamp,
@@ -4735,7 +4733,7 @@ mod tests {
     fn checked_conversion_without_panic() {
         let result = politely_checked_conversion::<u128, i128>(u128::MAX);
 
-        assert_eq!(result,Err("Overflow detected with 340282366920938463463374607431768211455: cannot be converted from u128 to i128".to_string()))
+        assert_eq!(result, Err("Overflow detected with 340282366920938463463374607431768211455: cannot be converted from u128 to i128".to_string()))
     }
 
     #[test]

@@ -1,6 +1,7 @@
 // Copyright (c) 2022, MASQ (https://masq.ai) and/or its affiliates. All rights reserved.
 
-// Code has been migrated to masq_lib/src/test_utils/mock_blockchain_client_server.rs
+// TODO: GH-805
+// The actual mock server has been migrated to masq_lib/src/test_utils/mock_blockchain_client_server.rs
 
 #[cfg(test)]
 mod tests {
@@ -29,7 +30,7 @@ mod tests {
         let port = find_free_port();
         let _subject = MockBlockchainClientServer::builder(port)
             .response("Thank you and good night", 40)
-            .run_on_docker()
+            .run_in_docker()
             .start();
         let mut client = connect(port);
         let chunks = vec![
@@ -61,7 +62,7 @@ mod tests {
         let _subject = MockBlockchainClientServer::builder(port)
             .response("Welcome, and thanks for coming!", 39)
             .response("Thank you and good night", 40)
-            .run_on_docker()
+            .run_in_docker()
             .start();
         let mut client = connect(port);
         client.write (b"POST /biddle HTTP/1.1\r\nContent-Length: 5\r\n\r\nfirstPOST /biddle HTTP/1.1\r\nContent-Length: 6\r\n\r\nsecond").unwrap();
@@ -85,7 +86,7 @@ mod tests {
         let port = find_free_port();
         let _subject = MockBlockchainClientServer::builder(port)
             .response("irrelevant".to_string(), 42)
-            .run_on_docker()
+            .run_in_docker()
             .start();
         let mut client = connect(port);
         let request = b"POST /biddle HTTP/1.1\r\n\r\nbody";
@@ -102,7 +103,7 @@ mod tests {
         let port = find_free_port();
         let _subject = MockBlockchainClientServer::builder(port)
             .response("irrelevant".to_string(), 42)
-            .run_on_docker()
+            .run_in_docker()
             .start();
         let mut client = connect(port);
         let request = b"GET /booga\r\nContent-Length: 4\r\n\r\nbody";
@@ -119,7 +120,7 @@ mod tests {
         let port = find_free_port();
         let _subject = MockBlockchainClientServer::builder(port)
             .response("irrelevant".to_string(), 42)
-            .run_on_docker()
+            .run_in_docker()
             .start();
         let mut client = connect(port);
         let request = b"GET /booga HTTP/2.0\r\nContent-Length: 4\r\n\r\nbody";
@@ -155,7 +156,7 @@ mod tests {
                     age: 37,
                 }),
             )
-            .run_on_docker()
+            .run_in_docker()
             .start();
         let mut client = connect(port);
 
@@ -217,7 +218,7 @@ mod tests {
                 },
                 42,
             )
-            .run_on_docker()
+            .run_in_docker()
             .start();
         let mut client = connect(port);
         let request =

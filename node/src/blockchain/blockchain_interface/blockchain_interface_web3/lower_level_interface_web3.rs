@@ -1,34 +1,24 @@
 // Copyright (c) 2019, MASQ (https://masq.ai) and/or its affiliates. All rights reserved.
 
-use crate::accountant::db_access_objects::payable_dao::PayableAccount;
-use crate::blockchain::blockchain_bridge::PendingPayableFingerprintSeeds;
 use crate::blockchain::blockchain_interface::blockchain_interface_web3::CONTRACT_ABI;
+use crate::blockchain::blockchain_interface::data_structures::errors::BlockchainError;
 use crate::blockchain::blockchain_interface::data_structures::errors::BlockchainError::QueryFailed;
-use crate::blockchain::blockchain_interface::data_structures::errors::{
-    BlockchainError, PayableTransactionError,
-};
-use crate::blockchain::blockchain_interface::data_structures::ProcessedPayableFallible;
 use crate::blockchain::blockchain_interface::lower_level_interface::LowBlockchainInt;
-use crate::blockchain::blockchain_interface_utils::{
-    convert_wei_to_gwei, send_payables_within_batch,
-};
-use crate::sub_lib::wallet::Wallet;
-use actix::Recipient;
 use ethereum_types::{H256, U256, U64};
 use futures::Future;
-use masq_lib::blockchains::chains::Chain;
-use masq_lib::logger::Logger;
+use serde_json::Value;
 use web3::contract::{Contract, Options};
 use web3::transports::{Batch, Http};
 use web3::types::{Address, BlockNumber, Filter, Log, TransactionReceipt};
-use web3::Web3;
+use web3::{Error, Web3};
 
 #[derive(Debug, PartialEq, Clone)]
 #[allow(clippy::large_enum_variant)]
 pub enum TransactionReceiptResult {
     NotPresent,
     Found(TransactionReceipt),
-    Error(String),
+    TransactionFailed(TransactionReceipt), // RemoteFailure
+    Error(String),                         // LocalFailure
 }
 
 pub struct LowBlockchainIntWeb3 {
@@ -92,22 +82,10 @@ impl LowBlockchainInt for LowBlockchainIntWeb3 {
         )
     }
 
-    fn get_transaction_receipt(
-        &self,
-        hash: H256,
-    ) -> Box<dyn Future<Item = Option<TransactionReceipt>, Error = BlockchainError>> {
-        Box::new(
-            self.web3
-                .eth()
-                .transaction_receipt(hash)
-                .map_err(|e| QueryFailed(e.to_string())),
-        )
-    }
-
-    fn get_transaction_receipt_batch(
+    fn get_transaction_receipt_in_batch(
         &self,
         hash_vec: Vec<H256>,
-    ) -> Box<dyn Future<Item = Vec<TransactionReceiptResult>, Error = BlockchainError>> {
+    ) -> Box<dyn Future<Item = Vec<Result<Value, Error>>, Error = BlockchainError>> {
         let _ = hash_vec.into_iter().map(|hash| {
             self.web3_batch.eth().transaction_receipt(hash);
         });
@@ -115,32 +93,12 @@ impl LowBlockchainInt for LowBlockchainIntWeb3 {
             self.web3_batch
                 .transport()
                 .submit_batch()
-                .map_err(|e| QueryFailed(e.to_string()))
-                .and_then(move |batch_response| {
-                    Ok(batch_response
-                        .into_iter()
-                        .map(|response| match response {
-                            Ok(result) => {
-                                match serde_json::from_value::<TransactionReceipt>(result) {
-                                    Ok(receipt) => TransactionReceiptResult::Found(receipt),
-                                    Err(e) => {
-                                        if e.to_string().contains("invalid type: null") {
-                                            TransactionReceiptResult::NotPresent
-                                        } else {
-                                            TransactionReceiptResult::Error(e.to_string())
-                                        }
-                                    }
-                                }
-                            }
-                            Err(e) => TransactionReceiptResult::Error(e.to_string()),
-                        })
-                        .collect::<Vec<TransactionReceiptResult>>())
-                }),
+                .map_err(|e| QueryFailed(e.to_string())),
         )
     }
 
-    fn get_contract(&self) -> Contract<Http> {
-        self.contract.clone()
+    fn get_contract_address(&self) -> Address {
+        self.contract.address()
     }
 
     fn get_transaction_logs(
@@ -155,40 +113,8 @@ impl LowBlockchainInt for LowBlockchainIntWeb3 {
         )
     }
 
-    fn submit_payables_in_batch(
-        &self,
-        logger: Logger,
-        chain: Chain,
-        consuming_wallet: Wallet,
-        fingerprints_recipient: Recipient<PendingPayableFingerprintSeeds>,
-        affordable_accounts: Vec<PayableAccount>,
-    ) -> Box<dyn Future<Item = Vec<ProcessedPayableFallible>, Error = PayableTransactionError>>
-    {
-        let web3_batch = self.web3_batch.clone();
-        let get_transaction_id = self.get_transaction_id(consuming_wallet.address());
-        let get_gas_price = self.get_gas_price();
-
-        Box::new(
-            get_transaction_id
-                .map_err(PayableTransactionError::TransactionID)
-                .and_then(move |pending_nonce| {
-                    get_gas_price
-                        .map_err(PayableTransactionError::GasPriceQueryFailed)
-                        .and_then(move |gas_price_wei| {
-                            let gas_price = convert_wei_to_gwei(gas_price_wei);
-                            send_payables_within_batch(
-                                logger,
-                                chain,
-                                web3_batch,
-                                consuming_wallet,
-                                gas_price,
-                                pending_nonce,
-                                fingerprints_recipient,
-                                affordable_accounts,
-                            )
-                        })
-                }),
-        )
+    fn get_web3_batch(&self) -> Web3<Batch<Http>> {
+        self.web3_batch.clone()
     }
 }
 
@@ -209,19 +135,18 @@ impl LowBlockchainIntWeb3 {
 
 #[cfg(test)]
 mod tests {
+    use crate::blockchain::blockchain_interface::blockchain_interface_web3::TRANSACTION_LITERAL;
+    use crate::blockchain::blockchain_interface::data_structures::errors::BlockchainError::QueryFailed;
     use crate::blockchain::blockchain_interface::{BlockchainError, BlockchainInterface};
+    use crate::blockchain::test_utils::make_blockchain_interface_web3;
     use crate::sub_lib::wallet::Wallet;
-    use masq_lib::utils::find_free_port;
-    use std::str::FromStr;
+    use crate::test_utils::make_wallet;
     use ethereum_types::{H256, U64};
     use futures::Future;
-    use web3::types::{BlockNumber, Bytes, FilterBuilder, H2048, Log, TransactionReceipt, U256};
     use masq_lib::test_utils::mock_blockchain_client_server::MBCSBuilder;
-    use crate::blockchain::blockchain_interface::blockchain_interface_web3::TRANSACTION_LITERAL;
-    use crate::blockchain::blockchain_interface::blockchain_interface_web3::lower_level_interface_web3::TransactionReceiptResult;
-    use crate::blockchain::blockchain_interface::data_structures::errors::BlockchainError::QueryFailed;
-    use crate::blockchain::test_utils::{make_blockchain_interface_web3, make_tx_hash, ReceiptResponseBuilder};
-    use crate::test_utils::{assert_string_contains, make_wallet};
+    use masq_lib::utils::find_free_port;
+    use std::str::FromStr;
+    use web3::types::{BlockNumber, Bytes, FilterBuilder, Log, U256};
 
     #[test]
     fn get_transaction_fee_balance_works() {
@@ -230,7 +155,7 @@ mod tests {
             .response("0x23".to_string(), 1)
             .start();
         let wallet = &Wallet::from_str("0x3f69f9efd4f2592fd70be8c32ecd9dce71c472fc").unwrap();
-        let subject = make_blockchain_interface_web3(Some(port));
+        let subject = make_blockchain_interface_web3(port);
 
         let result = subject
             .lower_interface()
@@ -247,7 +172,7 @@ mod tests {
         let _blockchain_client_server = MBCSBuilder::new(port)
             .response("0xFFFQ".to_string(), 0)
             .start();
-        let subject = make_blockchain_interface_web3(Some(port));
+        let subject = make_blockchain_interface_web3(port);
 
         let result = subject
             .lower_interface()
@@ -272,7 +197,7 @@ mod tests {
         let _blockchain_client_server = MBCSBuilder::new(port)
             .response("0x01".to_string(), 1)
             .start();
-        let subject = make_blockchain_interface_web3(Some(port));
+        let subject = make_blockchain_interface_web3(port);
 
         let result = subject.lower_interface().get_gas_price().wait().unwrap();
 
@@ -283,7 +208,7 @@ mod tests {
     fn get_gas_price_returns_error() {
         let port = find_free_port();
         let _blockchain_client_server = MBCSBuilder::new(port).start();
-        let subject = make_blockchain_interface_web3(Some(port));
+        let subject = make_blockchain_interface_web3(port);
 
         let error = subject
             .lower_interface()
@@ -303,7 +228,7 @@ mod tests {
         let _blockchain_client_server = MBCSBuilder::new(port)
             .response("0x23".to_string(), 1)
             .start();
-        let subject = make_blockchain_interface_web3(Some(port));
+        let subject = make_blockchain_interface_web3(port);
 
         let result = subject.lower_interface().get_block_number().wait();
 
@@ -316,7 +241,7 @@ mod tests {
         let _blockchain_client_server = MBCSBuilder::new(port)
             .response("trash".to_string(), 1)
             .start();
-        let subject = make_blockchain_interface_web3(Some(port));
+        let subject = make_blockchain_interface_web3(port);
 
         let error = subject
             .lower_interface()
@@ -338,7 +263,7 @@ mod tests {
         let _blockchain_client_server = MBCSBuilder::new(port)
             .response("0x23".to_string(), 1)
             .start();
-        let subject = make_blockchain_interface_web3(Some(port));
+        let subject = make_blockchain_interface_web3(port);
         let wallet = &Wallet::from_str("0x3f69f9efd4f2592fd70be8c32ecd9dce71c472fc").unwrap();
 
         let result = subject
@@ -355,7 +280,7 @@ mod tests {
         let _blockchain_client_server = MBCSBuilder::new(port)
             .response("0xFFFQ".to_string(), 0)
             .start();
-        let subject = make_blockchain_interface_web3(Some(port));
+        let subject = make_blockchain_interface_web3(port);
 
         let result = subject
             .lower_interface()
@@ -383,7 +308,7 @@ mod tests {
                 0,
             )
             .start();
-        let subject = make_blockchain_interface_web3(Some(port));
+        let subject = make_blockchain_interface_web3(port);
 
         let result = subject
             .lower_interface()
@@ -408,7 +333,7 @@ mod tests {
             )
             .start();
         let expected_err_msg = "Invalid hex";
-        let subject = make_blockchain_interface_web3(Some(port));
+        let subject = make_blockchain_interface_web3(port);
 
         let result = subject
             .lower_interface()
@@ -432,163 +357,10 @@ mod tests {
     }
 
     #[test]
-    fn transaction_receipt_works() {
-        let port = find_free_port();
-        let tx_hash =
-            H256::from_str("a128f9ca1e705cc20a936a24a7fa1df73bad6e0aaf58e8e6ffcc154a7cff6e0e")
-                .unwrap();
-        let block_hash =
-            H256::from_str("6d0abccae617442c26104c2bc63d1bc05e1e002e555aec4ab62a46e826b18f18")
-                .unwrap();
-        let block_number = U64::from_str("b0328d").unwrap();
-        let cumulative_gas_used = U256::from_str("60ef").unwrap();
-        let gas_used = U256::from_str("60ef").unwrap();
-        let status = U64::from(0);
-        let tx_receipt_response = ReceiptResponseBuilder::default()
-            .transaction_hash(tx_hash)
-            .block_hash(block_hash)
-            .block_number(block_number)
-            .cumulative_gas_used(cumulative_gas_used)
-            .gas_used(gas_used)
-            .status(status)
-            .build();
-        let _blockchain_client_server = MBCSBuilder::new(port)
-            .raw_response(tx_receipt_response)
-            .start();
-        let subject = make_blockchain_interface_web3(Some(port));
-
-        let result = subject
-            .lower_interface()
-            .get_transaction_receipt(tx_hash)
-            .wait();
-
-        let expected_receipt = TransactionReceipt {
-            transaction_hash: tx_hash,
-            transaction_index: Default::default(),
-            block_hash: Some(block_hash),
-            block_number: Some(block_number),
-            cumulative_gas_used,
-            gas_used: Some(gas_used),
-            contract_address: None,
-            logs: vec![],
-            status: Some(status),
-            root: None,
-            logs_bloom: Default::default(),
-        };
-        assert_eq!(result, Ok(Some(expected_receipt)));
-    }
-
-    #[test]
-    fn get_transaction_receipt_handles_errors() {
-        let port = find_free_port();
-        let subject = make_blockchain_interface_web3(Some(port));
-        let tx_hash = make_tx_hash(4564546);
-
-        let actual_error = subject
-            .lower_interface()
-            .get_transaction_receipt(tx_hash)
-            .wait()
-            .unwrap_err();
-        let error_message = if let BlockchainError::QueryFailed(em) = actual_error {
-            em
-        } else {
-            panic!("Expected BlockchainError::QueryFailed(msg)");
-        };
-        assert_string_contains(
-            error_message.as_str(),
-            "Transport error: Error(Connect, Os { code: ",
-        );
-        assert_string_contains(
-            error_message.as_str(),
-            ", kind: ConnectionRefused, message: ",
-        );
-    }
-
-    #[test]
-    fn transaction_receipt_batch_works() {
-        let port = find_free_port();
-        let tx_hash_1 =
-            H256::from_str("a128f9ca1e705cc20a936a24a7fa1df73bad6e0aaf58e8e6ffcc154a7cff6e0e")
-                .unwrap();
-        let tx_hash_2 =
-            H256::from_str("a128f9ca1e705cc20a936a24a7fa1df73bad6e0aaf58e8e6ffcc154a7cff6e0f")
-                .unwrap();
-        let tx_hash_3 =
-            H256::from_str("a128f9ca1e705cc20a936a24a7fa1df73bad6e0aaf58e8e6ffcc154a7cff6e0a")
-                .unwrap();
-        let tx_hash_4 =
-            H256::from_str("a128f9ca1e705cc20a936a24a7fa1df73bad6e0aaf58e8e6ffcc154a7cff6e0b")
-                .unwrap();
-        let tx_hash_vec = vec![tx_hash_1, tx_hash_2, tx_hash_3, tx_hash_4];
-        let block_hash =
-            H256::from_str("6d0abccae617442c26104c2bc63d1bc05e1e002e555aec4ab62a46e826b18f18")
-                .unwrap();
-        let block_number = U64::from_str("b0328d").unwrap();
-        let cumulative_gas_used = U256::from_str("60ef").unwrap();
-        let gas_used = U256::from_str("60ef").unwrap();
-        let status = U64::from(0);
-        let logs_bloom = H2048::from_str("00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000080000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000800000000000000000000000000000000000000000000000000000000000000080000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000800000000000000000000000000000000000").unwrap();
-        let tx_receipt_response = ReceiptResponseBuilder::default()
-            .transaction_hash(tx_hash_1)
-            .block_hash(block_hash)
-            .block_number(block_number)
-            .cumulative_gas_used(cumulative_gas_used)
-            .gas_used(gas_used)
-            .status(status)
-            .logs_bloom(logs_bloom)
-            .build();
-        let _blockchain_client_server = MBCSBuilder::new(port)
-            .begin_batch()
-            .err_response(
-                429,
-                "The requests per second (RPS) of your requests are higher than your plan allows."
-                    .to_string(),
-                7,
-            )
-            .raw_response(r#"{ "jsonrpc": "2.0", "id": 1, "result": null }"#.to_string())
-            .raw_response(tx_receipt_response)
-            .response("trash".to_string(), 0)
-            .end_batch()
-            .start();
-        let subject = make_blockchain_interface_web3(Some(port));
-
-        let result = subject
-            .lower_interface()
-            .get_transaction_receipt_batch(tx_hash_vec)
-            .wait()
-            .unwrap();
-
-        assert_eq!(result[0], TransactionReceiptResult::Error("RPC error: Error { code: ServerError(429), message: \"The requests per second (RPS) of your requests are higher than your plan allows.\", data: None }".to_string()));
-        assert_eq!(result[1], TransactionReceiptResult::NotPresent);
-        assert_eq!(
-            result[2],
-            TransactionReceiptResult::Found(TransactionReceipt {
-                transaction_hash: tx_hash_1,
-                transaction_index: Default::default(),
-                block_hash: Some(block_hash),
-                block_number: Some(block_number),
-                cumulative_gas_used,
-                gas_used: Some(gas_used),
-                contract_address: None,
-                logs: vec![],
-                status: Some(status),
-                root: None,
-                logs_bloom
-            })
-        );
-        assert_eq!(
-            result[3],
-            TransactionReceiptResult::Error(
-                "invalid type: string \"trash\", expected struct Receipt".to_string()
-            )
-        );
-    }
-
-    #[test]
     fn transaction_receipt_batch_fails_on_submit_batch() {
         let port = find_free_port();
         let _blockchain_client_server = MBCSBuilder::new(port).start();
-        let subject = make_blockchain_interface_web3(Some(port));
+        let subject = make_blockchain_interface_web3(port);
         let tx_hash_1 =
             H256::from_str("a128f9ca1e705cc20a936a24a7fa1df73bad6e0aaf58e8e6ffcc154a7cff6e0e")
                 .unwrap();
@@ -599,7 +371,7 @@ mod tests {
 
         let result = subject
             .lower_interface()
-            .get_transaction_receipt_batch(tx_hash_vec)
+            .get_transaction_receipt_in_batch(tx_hash_vec)
             .wait()
             .unwrap_err();
 
@@ -646,7 +418,7 @@ mod tests {
               ]
             }"#.to_string())
             .start();
-        let subject = make_blockchain_interface_web3(Some(port));
+        let subject = make_blockchain_interface_web3(port);
         let contract_address = subject.chain.rec().contract;
         let start_block = BlockNumber::Number(U64::from(100));
         let response_block_number = BlockNumber::Number(U64::from(200));
@@ -728,7 +500,7 @@ mod tests {
               ]
             }"#.to_string())
             .start();
-        let subject = make_blockchain_interface_web3(Some(port));
+        let subject = make_blockchain_interface_web3(port);
         let contract_address = subject.chain.rec().contract;
         let start_block = BlockNumber::Number(U64::from(100));
         let response_block_number = BlockNumber::Number(U64::from(200));
