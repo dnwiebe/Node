@@ -375,8 +375,31 @@ impl StreamHandlerPool {
             stream_writer_key
         );
         let report_to_counterpart = match self.stream_writers.remove(&stream_writer_key) {
-            None | Some(None) => false,
-            Some(Some(_sender_wrapper)) => true,
+            None => {
+                trace!(
+                    self.logger,
+                    "While handling RemoveStreamMsg: Stream Writers did not contain any entry for key {}",
+                    stream_writer_key
+                );
+                false
+            }
+            Some(None) => {
+                error!(
+                    self.logger,
+                    "An unpopulated entry in stream_writers was found for a {:?} stream ({:?}) from \
+                    a client. This shouldn't be possible. Investigate!",
+                    msg.stream_type, stream_writer_key
+                );
+                false
+            }
+            Some(Some(_sender_wrapper)) => {
+                trace!(
+                    self.logger,
+                    "While handling RemoveStreamMsg: Stream Writers contained an entry for key {}, also found stream writer; removing",
+                    stream_writer_key
+                );
+                true
+            }
         };
         let stream_shutdown_msg = StreamShutdownMsg {
             peer_addr: msg.peer_addr,
@@ -1271,10 +1294,13 @@ mod tests {
 
     #[test]
     fn handle_remove_stream_msg_handles_stream_waiting_for_connect_scenario() {
+        init_test_logging();
+        let test_name = "handle_remove_stream_msg_handles_stream_waiting_for_connect_scenario";
         let (recorder, _, recording_arc) = make_recorder();
-        let system = System::new("test");
+        let system = System::new(test_name);
         let sub = recorder.start().recipient::<StreamShutdownMsg>();
         let mut subject = StreamHandlerPool::new(vec![], false);
+        subject.logger = Logger::new(test_name);
         let peer_addr = SocketAddr::from_str("1.2.3.4:5678").unwrap();
         let local_addr = SocketAddr::from_str("127.0.0.1:0").unwrap();
         let sw_key = StreamWriterKey::from(peer_addr);
@@ -1300,6 +1326,11 @@ mod tests {
                 report_to_counterpart: false
             }
         );
+        TestLogHandler::new().exists_log_containing(&format!(
+            "ERROR: {}: An unpopulated entry in stream_writers was found for a \
+            Clandestine stream ({:?}) from a client. This shouldn't be possible. Investigate!",
+            test_name, sw_key
+        ));
     }
 
     #[test]

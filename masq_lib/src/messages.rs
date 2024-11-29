@@ -492,7 +492,7 @@ pub struct UiConfigurationResponse {
     #[serde(rename = "portMappingProtocol")]
     pub port_mapping_protocol_opt: Option<String>,
     #[serde(rename = "startBlock")]
-    pub start_block: u64,
+    pub start_block_opt: Option<u64>,
     #[serde(rename = "consumingWalletPrivateKeyOpt")]
     pub consuming_wallet_private_key_opt: Option<String>,
     // This item is calculated from the private key, not stored in the database, so that

@@ -3,7 +3,7 @@
 pub mod errors;
 use crate::accountant::db_access_objects::pending_payable_dao::PendingPayable;
 use crate::sub_lib::wallet::Wallet;
-use web3::types::H256;
+use web3::types::{BlockNumber, H256};
 use web3::Error;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -13,9 +13,9 @@ pub struct BlockchainTransaction {
     pub wei_amount: u128,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct RetrievedBlockchainTransactions {
-    pub new_start_block: u64,
+    pub new_start_block: BlockNumber,
     pub transactions: Vec<BlockchainTransaction>,
 }
 

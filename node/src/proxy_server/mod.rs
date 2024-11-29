@@ -58,7 +58,7 @@ use tokio::prelude::Future;
 pub const CRASH_KEY: &str = "PROXYSERVER";
 pub const RETURN_ROUTE_TTL: Duration = Duration::from_secs(120);
 
-pub const STREAM_KEY_PURGE_DELAY: Duration = Duration::from_secs(5);
+pub const STREAM_KEY_PURGE_DELAY: Duration = Duration::from_secs(30);
 
 struct ProxyServerOutSubs {
     dispatcher: Recipient<TransmitDataMsg>,
@@ -230,7 +230,7 @@ impl Handler<StreamKeyPurge> for ProxyServer {
     type Result = ();
 
     fn handle(&mut self, msg: StreamKeyPurge, _ctx: &mut Self::Context) -> Self::Result {
-        self.purge_stream_key(&msg.stream_key);
+        self.purge_stream_key(&msg.stream_key, "scheduled message");
     }
 }
 
@@ -326,12 +326,7 @@ impl ProxyServer {
     }
 
     fn retire_stream_key(&mut self, stream_key: &StreamKey) {
-        warning!(
-            self.logger,
-            "Retiring stream key {}: DnsResolveFailure",
-            stream_key
-        );
-        self.purge_stream_key(stream_key);
+        self.purge_stream_key(stream_key, "DNS resolution failure");
     }
 
     fn send_dns_failure_response_to_the_browser(
@@ -542,11 +537,7 @@ impl ProxyServer {
                     })
                     .expect("Dispatcher is dead");
                 if last_data {
-                    debug!(
-                        self.logger,
-                        "Received last data for the stream key {stream_key}."
-                    );
-                    self.purge_stream_key(&stream_key);
+                    self.purge_stream_key(&stream_key, "last data received from the exit node");
                 }
             }
             None => {
@@ -624,12 +615,12 @@ impl ProxyServer {
             }
             Some(sk) => sk,
         };
+        self.schedule_stream_key_purge(stream_key);
         if msg.report_to_counterpart {
             debug!(
                 self.logger,
                 "Reporting shutdown of {} to counterpart", &stream_key
             );
-            self.schedule_stream_key_purge(stream_key);
             let ibcd = InboundClientData {
                 timestamp: SystemTime::now(),
                 peer_addr: msg.peer_addr,
@@ -644,12 +635,6 @@ impl ProxyServer {
             {
                 error!(self.logger, "{}", e)
             };
-        } else {
-            debug!(
-                self.logger,
-                "Retiring stream key {}: StreamShutdownMsg for peer {}", &stream_key, msg.peer_addr
-            );
-            self.purge_stream_key(&stream_key);
         }
     }
 
@@ -676,8 +661,11 @@ impl ProxyServer {
         }
     }
 
-    fn purge_stream_key(&mut self, stream_key: &StreamKey) {
-        debug!(self.logger, "Retiring stream key {}", &stream_key);
+    fn purge_stream_key(&mut self, stream_key: &StreamKey, reason: &str) {
+        debug!(
+            self.logger,
+            "Retiring stream key {} due to {}", &stream_key, reason
+        );
         let _ = self.keys_and_addrs.remove_a(stream_key);
         let _ = self.stream_key_routes.remove(stream_key);
         let _ = self.tunneled_hosts.remove(stream_key);
@@ -1439,6 +1427,7 @@ mod tests {
     fn constants_have_correct_values() {
         assert_eq!(CRASH_KEY, "PROXYSERVER");
         assert_eq!(RETURN_ROUTE_TTL, Duration::from_secs(120));
+        assert_eq!(STREAM_KEY_PURGE_DELAY, Duration::from_secs(30));
     }
 
     const STANDARD_CONSUMING_WALLET_BALANCE: i64 = 0;
@@ -3670,7 +3659,7 @@ mod tests {
         assert_eq!(transmit_data_msg.data, b"16 bytes of data".to_vec());
         let tlh = TestLogHandler::new();
         tlh.exists_log_containing(&format!(
-            "DEBUG: {test_name}: Received last data for the stream key {:?}.",
+            "DEBUG: {test_name}: Retiring stream key {:?} due to last data received from the exit node",
             stream_key
         ));
         tlh.exists_log_containing(&format!(
@@ -3757,6 +3746,25 @@ mod tests {
 
     #[test]
     fn proxy_server_schedules_stream_key_purge_once_shutdown_order_is_received_for_stream() {
+        let common_msg = StreamShutdownMsg {
+            peer_addr: SocketAddr::from_str("1.2.3.4:5678").unwrap(),
+            stream_type: RemovedStreamType::NonClandestine(NonClandestineAttributes {
+                reception_port: 0,
+                sequence_number: 0,
+            }),
+            report_to_counterpart: true,
+        };
+        assert_stream_is_purged_with_a_delay(StreamShutdownMsg {
+            report_to_counterpart: true,
+            ..common_msg.clone()
+        });
+        assert_stream_is_purged_with_a_delay(StreamShutdownMsg {
+            report_to_counterpart: false,
+            ..common_msg
+        });
+    }
+
+    fn assert_stream_is_purged_with_a_delay(msg: StreamShutdownMsg) {
         /*
         +------------------------------------------------------------------+
         | (0ms)                                                            |
@@ -3796,13 +3804,12 @@ mod tests {
             false,
         );
         subject.stream_key_purge_delay = Duration::from_millis(stream_key_purge_delay_in_millis);
-        subject.logger = Logger::new(test_name);
+        subject.logger = Logger::new(&test_name);
         subject.subs = Some(make_proxy_server_out_subs());
-        let stream_key = StreamKey::make_meaningful_stream_key(test_name);
-        let socket_addr = SocketAddr::from_str("1.2.3.4:5678").unwrap();
+        let stream_key = StreamKey::make_meaningful_stream_key(&test_name);
         subject
             .keys_and_addrs
-            .insert(stream_key.clone(), socket_addr.clone());
+            .insert(stream_key.clone(), msg.peer_addr.clone());
         subject.stream_key_routes.insert(
             stream_key.clone(),
             RouteQueryResponse {
@@ -3830,16 +3837,8 @@ mod tests {
         let bind_msg = BindMessage { peer_actors };
         proxy_server_addr.try_send(bind_msg).unwrap();
         let time_before_sending_package = SystemTime::now();
-        let stream_shutdown_msg = StreamShutdownMsg {
-            peer_addr: socket_addr,
-            stream_type: RemovedStreamType::NonClandestine(NonClandestineAttributes {
-                reception_port: 0,
-                sequence_number: 0,
-            }),
-            report_to_counterpart: true,
-        };
 
-        proxy_server_addr.try_send(stream_shutdown_msg).unwrap();
+        proxy_server_addr.try_send(msg).unwrap();
 
         let time_after_sending_package = time_before_sending_package
             .checked_add(Duration::from_secs(1))
@@ -5303,7 +5302,7 @@ mod tests {
         let make_params = make_params_arc.lock().unwrap();
         assert_eq!(make_params.len(), 3);
         TestLogHandler::new().exists_log_containing(&format!(
-            "WARN: {test_name}: Retiring stream key {stream_key_clone}: DnsResolveFailure"
+            "DEBUG: {test_name}: Retiring stream key {stream_key_clone} due to DNS resolution failure"
         ));
     }
 
@@ -5836,66 +5835,6 @@ mod tests {
             It will be purged after {:?}.",
             &affected_stream_key, STREAM_KEY_PURGE_DELAY
         ));
-    }
-
-    #[test]
-    fn handle_stream_shutdown_msg_does_not_report_to_counterpart_when_unnecessary() {
-        let mut subject = ProxyServer::new(main_cryptde(), alias_cryptde(), true, None, false);
-        let unaffected_socket_addr = SocketAddr::from_str("2.3.4.5:6789").unwrap();
-        let unaffected_stream_key = StreamKey::make_meaningful_stream_key("unaffected");
-        let affected_socket_addr = SocketAddr::from_str("3.4.5.6:7890").unwrap();
-        let affected_stream_key = StreamKey::make_meaningful_stream_key("affected");
-        subject
-            .keys_and_addrs
-            .insert(unaffected_stream_key, unaffected_socket_addr);
-        subject
-            .keys_and_addrs
-            .insert(affected_stream_key, affected_socket_addr);
-        subject.stream_key_routes.insert(
-            unaffected_stream_key,
-            RouteQueryResponse {
-                route: Route { hops: vec![] },
-                expected_services: ExpectedServices::RoundTrip(vec![], vec![], 1234),
-            },
-        );
-        subject.stream_key_routes.insert(
-            affected_stream_key,
-            RouteQueryResponse {
-                route: Route { hops: vec![] },
-                expected_services: ExpectedServices::RoundTrip(vec![], vec![], 1234),
-            },
-        );
-        subject
-            .tunneled_hosts
-            .insert(unaffected_stream_key, "blah".to_string());
-        subject
-            .tunneled_hosts
-            .insert(affected_stream_key, "blah".to_string());
-
-        subject.handle_stream_shutdown_msg(StreamShutdownMsg {
-            peer_addr: affected_socket_addr,
-            stream_type: RemovedStreamType::NonClandestine(NonClandestineAttributes {
-                reception_port: HTTP_PORT,
-                sequence_number: 1234,
-            }),
-            report_to_counterpart: false,
-        });
-
-        // Subject is unbound but didn't panic; therefore, no attempt to send to Hopper: perfect!
-        assert!(subject
-            .keys_and_addrs
-            .a_to_b(&unaffected_stream_key)
-            .is_some());
-        assert!(subject
-            .stream_key_routes
-            .contains_key(&unaffected_stream_key));
-        assert!(subject.tunneled_hosts.contains_key(&unaffected_stream_key));
-        assert!(subject
-            .keys_and_addrs
-            .a_to_b(&affected_stream_key)
-            .is_none());
-        assert!(!subject.stream_key_routes.contains_key(&affected_stream_key));
-        assert!(!subject.tunneled_hosts.contains_key(&affected_stream_key));
     }
 
     #[test]

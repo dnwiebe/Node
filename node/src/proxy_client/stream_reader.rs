@@ -3,7 +3,6 @@ use crate::sub_lib::proxy_client::InboundServerData;
 use crate::sub_lib::sequencer::Sequencer;
 use crate::sub_lib::stream_key::StreamKey;
 use crate::sub_lib::tokio_wrappers::ReadHalfWrapper;
-use crate::sub_lib::utils;
 use crate::sub_lib::utils::indicates_dead_stream;
 use actix::Recipient;
 use crossbeam_channel::{Receiver, Sender};
@@ -52,10 +51,9 @@ impl Future for StreamReader {
                     if self.logger.trace_enabled() {
                         trace!(
                             self.logger,
-                            "Read {}-byte chunk from {}: {}",
+                            "Read {}-byte chunk from {}",
                             len,
-                            self.peer_addr,
-                            utils::to_string(&Vec::from(&buf[0..len]))
+                            self.peer_addr
                         );
                     }
                     let stream_key = self.stream_key;

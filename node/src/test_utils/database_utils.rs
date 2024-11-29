@@ -196,7 +196,7 @@ fn contains_particular_list_of_key_words(
             found += 1
         }
     });
-    assert_eq!(found,1, "We found {} occurrences of the searched line in the tested sql although only a one is considered correct", found)
+    assert_eq!(found, 1, "We found {} occurrences of the searched line in the tested sql although only a one is considered correct", found)
 }
 
 fn prepare_expected_vectors_of_words_including_sorting(

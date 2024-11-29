@@ -241,8 +241,10 @@ impl MockBlockchainClientServer {
                         let mut requests = requests_arc.lock().unwrap();
                         requests.push(body);
                     }
-                    let response = responses.remove(0);
-                    Self::send_body(conn_state, response);
+                    if !responses.is_empty() {
+                        let response = responses.remove(0);
+                        Self::send_body(conn_state, response);
+                    }
                     let _ = notifier_tx.send(()); // receiver doesn't exist if test didn't set it up
                 }
                 None => (),
@@ -437,7 +439,7 @@ mod tests {
             .response("Thank you and good night", 40)
             .start();
         let mut client = connect(port);
-        client.write (b"POST /biddle HTTP/1.1\r\nContent-Length: 5\r\n\r\nfirstPOST /biddle HTTP/1.1\r\nContent-Length: 6\r\n\r\nsecond").unwrap();
+        client.write(b"POST /biddle HTTP/1.1\r\nContent-Length: 5\r\n\r\nfirstPOST /biddle HTTP/1.1\r\nContent-Length: 6\r\n\r\nsecond").unwrap();
 
         let (_, body) = receive_response(&mut client);
         assert_eq!(
@@ -567,7 +569,7 @@ mod tests {
         assert_eq!(notified.try_recv().is_err(), true);
 
         let requests = subject.requests();
-        assert_eq! (requests, vec! [
+        assert_eq!(requests, vec![
             "POST /biddle HTTP/1.1\r\nContent-Type: application-json\r\nContent-Length: 82\r\n\r\n{\"jsonrpc\": \"2.0\", \"method\": \"first\", \"params\": [\"biddle\", \"de\", \"bee\"], \"id\": 40}".to_string(),
             "POST /biddle HTTP/1.1\r\nContent-Type: application-json\r\nContent-Length: 48\r\n\r\n{\"jsonrpc\": \"2.0\", \"method\": \"second\", \"id\": 42}".to_string(),
             "POST /biddle HTTP/1.1\r\nContent-Type: application-json\r\nContent-Length: 47\r\n\r\n{\"jsonrpc\": \"2.0\", \"method\": \"third\", \"id\": 42}".to_string(),
@@ -600,7 +602,7 @@ mod tests {
             r#"{"jsonrpc": "2.0", "result": {"name":"Billy","age":15}, "id": 42}"#
         );
         let requests = subject.requests();
-        assert_eq! (requests, vec! [
+        assert_eq!(requests, vec![
             "POST / HTTP/1.1\r\ncontent-type: application/json\r\nuser-agent: web3.rs\r\nhost: 172.18.0.1:32768\r\ncontent-length: 308\r\n\r\n{\"jsonrpc\":\"2.0\",\"method\":\"eth_getLogs\",\"params\":[{\"address\":\"0x59882e4a8f5d24643d4dda422922a870f1b3e664\",\"fromBlock\":\"0x3e8\",\"toBlock\":\"latest\",\"topics\":[\"0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef\",null,\"0x00000000000000000000000027d9a2ac83b493f88ce9b4532edcf74e95b9788d\"]}],\"id\":0}".to_string()
         ])
     }
@@ -704,6 +706,6 @@ mod tests {
             body.len(),
             body
         )
-        .into_bytes()
+            .into_bytes()
     }
 }

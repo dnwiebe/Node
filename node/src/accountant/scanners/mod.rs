@@ -862,7 +862,7 @@ impl Scanner<RetrieveTransactions, ReceivedPayments> for ReceivableScanner {
 
             match self
                 .persistent_configuration
-                .set_start_block(msg.new_start_block)
+                .set_start_block(Some(msg.new_start_block))
             {
                 Ok(()) => debug!(logger, "Start block updated to {}", msg.new_start_block),
                 Err(e) => panic!(
@@ -914,7 +914,7 @@ impl ReceivableScanner {
         let new_start_block = msg.new_start_block;
         match self
             .persistent_configuration
-            .set_start_block_from_txn(new_start_block, &mut txn)
+            .set_start_block_from_txn(Some(new_start_block), &mut txn)
         {
             Ok(()) => (),
             Err(e) => panic!(
@@ -1243,7 +1243,7 @@ mod tests {
         assert_eq!(receivable_scanner.common.initiated_at_opt.is_some(), false);
         receivable_scanner
             .persistent_configuration
-            .set_start_block(136890)
+            .set_start_block(Some(136890))
             .unwrap();
         let set_params = set_params_arc.lock().unwrap();
         assert_eq!(
@@ -1631,7 +1631,7 @@ mod tests {
             .iter()
             .map(|ppayable| ppayable.hash)
             .collect::<HashSet<H256>>();
-        // Not in an ascending order
+        // Not in ascending order
         let rowids_and_hashes_from_fingerprints = vec![(hash_1, 3), (hash_3, 5), (hash_2, 6)]
             .iter()
             .map(|(hash, _id)| *hash)
@@ -1883,7 +1883,7 @@ mod tests {
         00000000000000000000000000000000000000000315 failed due to RecordDeletion(\"Gosh, I overslept \
         without an alarm set\")");
         let log_handler = TestLogHandler::new();
-        // There is a possible situation when we stumble over missing fingerprints and so we log it.
+        // There is a possible situation when we stumble over missing fingerprints, so we log it.
         // Here we don't and so any ERROR log shouldn't turn up
         log_handler.exists_no_log_containing(&format!("ERROR: {}", test_name))
     }
@@ -3070,6 +3070,7 @@ mod tests {
         let set_start_block_params_arc = Arc::new(Mutex::new(vec![]));
         let new_start_block = 4321;
         let persistent_config = PersistentConfigurationMock::new()
+            .start_block_result(Ok(None))
             .set_start_block_params(&set_start_block_params_arc)
             .set_start_block_result(Ok(()));
         let mut subject = ReceivableScannerBuilder::new()
@@ -3086,7 +3087,7 @@ mod tests {
 
         assert_eq!(message_opt, None);
         let set_start_block_params = set_start_block_params_arc.lock().unwrap();
-        assert_eq!(*set_start_block_params, vec![4321]);
+        assert_eq!(*set_start_block_params, vec![Some(4321)]);
         TestLogHandler::new().exists_log_containing(&format!(
             "INFO: {test_name}: No newly received payments were detected during the scanning process."
         ));
@@ -3099,16 +3100,21 @@ mod tests {
         init_test_logging();
         let test_name = "no_transactions_received_but_start_block_setting_fails";
         let now = SystemTime::now();
-        let persistent_config = PersistentConfigurationMock::new().set_start_block_result(Err(
-            PersistentConfigError::UninterpretableValue("Illiterate database manager".to_string()),
-        ));
+        let set_start_block_params_arc = Arc::new(Mutex::new(vec![]));
+        let new_start_block = 6709u64;
+        let persistent_config = PersistentConfigurationMock::new()
+            .start_block_result(Ok(None))
+            .set_start_block_params(&set_start_block_params_arc)
+            .set_start_block_result(Err(PersistentConfigError::UninterpretableValue(
+                "Illiterate database manager".to_string(),
+            )));
         let mut subject = ReceivableScannerBuilder::new()
             .persistent_configuration(persistent_config)
             .build();
         let msg = ReceivedPayments {
             timestamp: now,
             payments: vec![],
-            new_start_block: 6709,
+            new_start_block,
             response_skeleton_opt: None,
         };
         // Not necessary, rather for preciseness
@@ -3132,6 +3138,7 @@ mod tests {
             .set_arbitrary_id_stamp(transaction_id);
         let transaction = TransactionSafeWrapper::new_with_builder(txn_inner_builder);
         let persistent_config = PersistentConfigurationMock::new()
+            .start_block_result(Ok(None))
             .set_start_block_from_txn_params(&set_start_block_from_txn_params_arc)
             .set_start_block_from_txn_result(Ok(()));
         let receivable_dao = ReceivableDaoMock::new()
@@ -3178,7 +3185,7 @@ mod tests {
         let set_by_guest_transaction_params = set_start_block_from_txn_params_arc.lock().unwrap();
         assert_eq!(
             *set_by_guest_transaction_params,
-            vec![(7890123, transaction_id)]
+            vec![(Some(7890123u64), transaction_id)]
         );
         let commit_params = commit_params_arc.lock().unwrap();
         assert_eq!(*commit_params, vec![()]);
@@ -3196,9 +3203,11 @@ mod tests {
         let now = SystemTime::now();
         let txn_inner_builder = TransactionInnerWrapperMockBuilder::default();
         let transaction = TransactionSafeWrapper::new_with_builder(txn_inner_builder);
-        let persistent_config = PersistentConfigurationMock::new().set_start_block_from_txn_result(
-            Err(PersistentConfigError::DatabaseError("Fatigue".to_string())),
-        );
+        let persistent_config = PersistentConfigurationMock::new()
+            .start_block_result(Ok(None))
+            .set_start_block_from_txn_result(Err(PersistentConfigError::DatabaseError(
+                "Fatigue".to_string(),
+            )));
         let receivable_dao = ReceivableDaoMock::new().more_money_received_result(transaction);
         let mut subject = ReceivableScannerBuilder::new()
             .receivable_dao(receivable_dao)
@@ -3240,8 +3249,9 @@ mod tests {
         let txn_inner_builder =
             TransactionInnerWrapperMockBuilder::default().commit_result(commit_err);
         let transaction = TransactionSafeWrapper::new_with_builder(txn_inner_builder);
-        let persistent_config =
-            PersistentConfigurationMock::new().set_start_block_from_txn_result(Ok(()));
+        let persistent_config = PersistentConfigurationMock::new()
+            .start_block_result(Ok(None))
+            .set_start_block_from_txn_result(Ok(()));
         let receivable_dao = ReceivableDaoMock::new().more_money_received_result(transaction);
         let mut subject = ReceivableScannerBuilder::new()
             .receivable_dao(receivable_dao)

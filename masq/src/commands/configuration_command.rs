@@ -131,7 +131,10 @@ impl ConfigurationCommand {
         dump_parameter_line(
             stream,
             "Start block:",
-            &configuration.start_block.to_string(),
+            &configuration
+                .start_block_opt
+                .map(|m| m.separate_with_commas())
+                .unwrap_or_else(|| "[Latest]".to_string()),
         );
         Self::dump_value_list(stream, "Past neighbors:", &configuration.past_neighbors);
         let payment_thresholds = Self::preprocess_combined_parameters({
@@ -333,7 +336,7 @@ mod tests {
                 exit_byte_rate: 129000000,
                 exit_service_rate: 160000000,
             },
-            start_block: 3456,
+            start_block_opt: None,
             scan_intervals: UiScanIntervals {
                 pending_payable_sec: 150500,
                 payable_sec: 155000,
@@ -378,7 +381,7 @@ mod tests {
 |Max block count:                  [Unlimited]\n\
 |Neighborhood mode:                standard\n\
 |Port mapping protocol:            PCP\n\
-|Start block:                      3456\n\
+|Start block:                      [Latest]\n\
 |Past neighbors:                   neighbor 1\n\
 |                                  neighbor 2\n\
 |Payment thresholds:               \n\
@@ -433,7 +436,7 @@ mod tests {
                 exit_byte_rate: 20,
                 exit_service_rate: 30,
             },
-            start_block: 3456,
+            start_block_opt: Some(1234567890u64),
             scan_intervals: UiScanIntervals {
                 pending_payable_sec: 1000,
                 payable_sec: 1000,
@@ -476,7 +479,7 @@ mod tests {
 |Max block count:                  100,000\n\
 |Neighborhood mode:                zero-hop\n\
 |Port mapping protocol:            PCP\n\
-|Start block:                      3456\n\
+|Start block:                      1,234,567,890\n\
 |Past neighbors:                   [?]\n\
 |Payment thresholds:               \n\
 |                                  Debt threshold:                   2,500 gwei\n\

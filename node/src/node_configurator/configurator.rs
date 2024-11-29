@@ -551,7 +551,8 @@ impl Configurator {
             persistent_config.earning_wallet_address(),
             "earningWalletAddressOpt",
         )?;
-        let start_block = Self::value_required(persistent_config.start_block(), "startBlock")?;
+        let start_block_opt =
+            Self::value_not_required(persistent_config.start_block(), "startBlock")?;
         let max_block_count_opt = match persistent_config.max_block_count() {
             Ok(value) => value,
             Err(e) => panic!(
@@ -649,7 +650,7 @@ impl Configurator {
                 exit_byte_rate,
                 exit_service_rate,
             },
-            start_block,
+            start_block_opt,
             scan_intervals: UiScanIntervals {
                 pending_payable_sec,
                 payable_sec,
@@ -786,11 +787,15 @@ impl Configurator {
     }
 
     fn set_start_block(&mut self, string_number: String) -> Result<(), (u64, String)> {
-        let block_number = match string_number.parse::<u64>() {
-            Ok(num) => num,
-            Err(e) => return Err((NON_PARSABLE_VALUE, format!("start block: {:?}", e))),
+        let block_number_opt = if "none".eq_ignore_ascii_case(&string_number) {
+            None
+        } else {
+            match string_number.parse::<u64>() {
+                Ok(num) => Some(num),
+                Err(e) => return Err((NON_PARSABLE_VALUE, format!("start block: {:?}", e))),
+            }
         };
-        match self.persistent_config.set_start_block(block_number) {
+        match self.persistent_config.set_start_block(block_number_opt) {
             Ok(_) => Ok(()),
             Err(e) => Err((CONFIGURATOR_WRITE_ERROR, format!("start block: {:?}", e))),
         }
@@ -2118,11 +2123,54 @@ mod tests {
         let (_, context_id) = UiSetConfigurationResponse::fmb(response.body.clone()).unwrap();
         assert_eq!(context_id, 4444);
         let check_start_block_params = set_start_block_params_arc.lock().unwrap();
-        assert_eq!(*check_start_block_params, vec![166666]);
-        TestLogHandler::new().exists_log_containing(&format!(
-            "DEBUG: {}: A request from UI received: {:?} from context id: {}",
-            test_name, msg, context_id
-        ));
+        assert_eq!(*check_start_block_params, vec![Some(166666)]);
+    }
+
+    #[test]
+    fn handle_none_cases() {
+        vec!["none", "None", "nOnE", "NoNe", "NONE"]
+            .iter()
+            .for_each(|value| handle_set_configuration_accepts_none_to_unset_start_block(value));
+    }
+
+    fn handle_set_configuration_accepts_none_to_unset_start_block(cfg_value: &str) {
+        init_test_logging();
+        let test_name = format!(
+            "handle_set_configuration_accepts_{}_to_unset_start_block",
+            &cfg_value
+        );
+        let set_start_block_params_arc = Arc::new(Mutex::new(vec![]));
+        let (ui_gateway, _, ui_gateway_recording_arc) = make_recorder();
+        let persistent_config = PersistentConfigurationMock::new()
+            .set_start_block_params(&set_start_block_params_arc)
+            .set_start_block_result(Ok(()));
+        let mut subject = make_subject(Some(persistent_config));
+        subject.logger = Logger::new(test_name.as_str());
+        let subject_addr = subject.start();
+        let peer_actors = peer_actors_builder().ui_gateway(ui_gateway).build();
+        subject_addr.try_send(BindMessage { peer_actors }).unwrap();
+        let msg = UiSetConfigurationRequest {
+            name: "start-block".to_string(),
+            value: cfg_value.to_string(),
+        };
+        let context_id = 4444;
+
+        subject_addr
+            .try_send(NodeFromUiMessage {
+                client_id: 1234,
+                body: msg.clone().tmb(context_id),
+            })
+            .unwrap();
+
+        let system = System::new("test");
+        System::current().stop();
+        system.run();
+        let ui_gateway_recording = ui_gateway_recording_arc.lock().unwrap();
+        let response = ui_gateway_recording.get_record::<NodeToUiMessage>(0);
+        let (_, context_id) = UiSetConfigurationResponse::fmb(response.body.clone()).unwrap();
+        assert_eq!(context_id, 4444);
+        let check_start_block_params = set_start_block_params_arc.lock().unwrap();
+        assert_eq!(*check_start_block_params, vec![None]);
     }
 
     #[test]
@@ -2498,7 +2546,7 @@ mod tests {
             .neighborhood_mode_result(Ok(NeighborhoodModeLight::Standard))
             .past_neighbors_result(Ok(Some(vec![node_descriptor.clone()])))
             .earning_wallet_address_result(Ok(Some(earning_wallet_address.clone())))
-            .start_block_result(Ok(3456));
+            .start_block_result(Ok(Some(3456)));
         let persistent_config = payment_thresholds_scan_intervals_rate_pack(persistent_config);
         let mut subject = make_subject(Some(persistent_config));
 
@@ -2541,7 +2589,7 @@ mod tests {
                     exit_byte_rate: 10,
                     exit_service_rate: 13
                 },
-                start_block: 3456,
+                start_block_opt: Some(3456),
                 scan_intervals: UiScanIntervals {
                     pending_payable_sec: 122,
                     payable_sec: 125,
@@ -2629,8 +2677,7 @@ mod tests {
             .past_neighbors_params(&past_neighbors_params_arc)
             .past_neighbors_result(Ok(Some(vec![node_descriptor.clone()])))
             .earning_wallet_address_result(Ok(Some(earning_wallet_address.clone())))
-            .start_block_result(Ok(3456))
-            .start_block_result(Ok(3456));
+            .start_block_result(Ok(Some(3456)));
         let persistent_config = payment_thresholds_scan_intervals_rate_pack(persistent_config);
         let mut subject = make_subject(Some(persistent_config));
 
@@ -2673,7 +2720,7 @@ mod tests {
                     exit_byte_rate: 10,
                     exit_service_rate: 13
                 },
-                start_block: 3456,
+                start_block_opt: Some(3456),
                 scan_intervals: UiScanIntervals {
                     pending_payable_sec: 122,
                     payable_sec: 125,
@@ -2700,7 +2747,7 @@ mod tests {
             .chain_name_result("ropsten".to_string())
             .gas_price_result(Ok(2345))
             .earning_wallet_address_result(Ok(None))
-            .start_block_result(Ok(3456))
+            .start_block_result(Ok(Some(3456)))
             .max_block_count_result(Ok(None))
             .neighborhood_mode_result(Ok(NeighborhoodModeLight::ZeroHop))
             .mapping_protocol_result(Ok(None))
@@ -2766,7 +2813,7 @@ mod tests {
                     exit_byte_rate: 0,
                     exit_service_rate: 0
                 },
-                start_block: 3456,
+                start_block_opt: Some(3456),
                 scan_intervals: UiScanIntervals {
                     pending_payable_sec: 0,
                     payable_sec: 0,
@@ -2789,7 +2836,7 @@ mod tests {
             .chain_name_result("ropsten".to_string())
             .gas_price_result(Ok(2345))
             .earning_wallet_address_result(Ok(Some("4a5e43b54c6C56Ebf7".to_string())))
-            .start_block_result(Ok(3456))
+            .start_block_result(Ok(Some(3456)))
             .max_block_count_result(Err(PersistentConfigError::DatabaseError(
                 "Corruption".to_string(),
             )));
@@ -2839,7 +2886,7 @@ mod tests {
             .earning_wallet_address_result(Ok(Some(
                 "0x0123456789012345678901234567890123456789".to_string(),
             )))
-            .start_block_result(Ok(3456))
+            .start_block_result(Ok(Some(3456)))
             .max_block_count_result(Ok(Some(100000)))
             .neighborhood_mode_result(Ok(NeighborhoodModeLight::ConsumeOnly))
             .mapping_protocol_result(Ok(Some(AutomapProtocol::Igdp)))

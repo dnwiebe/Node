@@ -7,6 +7,7 @@ use masq_lib::shared_schema::gas_price_arg;
 use masq_lib::shared_schema::min_hops_arg;
 use masq_lib::short_writeln;
 use masq_lib::utils::ExpectValue;
+use std::num::IntErrorKind;
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct SetConfigurationCommand {
@@ -35,9 +36,17 @@ impl SetConfigurationCommand {
 }
 
 fn validate_start_block(start_block: String) -> Result<(), String> {
-    match start_block.parse::<u64>() {
-        Ok(_) => Ok(()),
-        _ => Err(start_block),
+    if "latest".eq_ignore_ascii_case(&start_block) || "none".eq_ignore_ascii_case(&start_block) {
+        Ok(())
+    } else {
+        match start_block.parse::<u64>() {
+            Ok(_) => Ok(()),
+            Err(e) if e.kind() == &IntErrorKind::PosOverflow => Err(
+                format!("Unable to parse '{}' into a starting block number or provide 'none' or 'latest' for the latest block number: digits exceed {}.",
+                        start_block, u64::MAX),
+            ),
+            Err(e) => Err(format!("Unable to parse '{}' into a starting block number or provide 'none' or 'latest' for the latest block number: {}.", start_block, e))
+        }
     }
 }
 
@@ -59,7 +68,7 @@ impl Command for SetConfigurationCommand {
 const SET_CONFIGURATION_ABOUT: &str =
     "Sets Node configuration parameters being enabled for this operation when the Node is running.";
 const START_BLOCK_HELP: &str =
-    "Ordinal number of the Ethereum block where scanning for transactions will start.";
+    "Ordinal number of the Ethereum block where scanning for transactions will start. Use 'latest' or 'none' for Latest block.";
 
 pub fn set_configurationify<'a>(shared_schema_arg: Arg<'a, 'a>) -> Arg<'a, 'a> {
     shared_schema_arg.takes_value(true).min_values(1)
@@ -103,7 +112,7 @@ mod tests {
         );
         assert_eq!(
             START_BLOCK_HELP,
-            "Ordinal number of the Ethereum block where scanning for transactions will start."
+            "Ordinal number of the Ethereum block where scanning for transactions will start. Use 'latest' or 'none' for Latest block."
         );
     }
 
@@ -123,9 +132,27 @@ mod tests {
     }
 
     #[test]
+    fn validate_start_block_catches_invalid_values() {
+        assert_eq!(validate_start_block("abc".to_string()), Err("Unable to parse 'abc' into a starting block number or provide 'none' or 'latest' for the latest block number: invalid digit found in string.".to_string()));
+        assert_eq!(validate_start_block("918446744073709551615".to_string()), Err("Unable to parse '918446744073709551615' into a starting block number or provide 'none' or 'latest' for the latest block number: digits exceed 18446744073709551615.".to_string()));
+        assert_eq!(validate_start_block("123,456,789".to_string()), Err("Unable to parse '123,456,789' into a starting block number or provide 'none' or 'latest' for the latest block number: invalid digit found in string.".to_string()));
+        assert_eq!(validate_start_block("123'456'789".to_string()), Err("Unable to parse '123'456'789' into a starting block number or provide 'none' or 'latest' for the latest block number: invalid digit found in string.".to_string()));
+    }
+    #[test]
     fn validate_start_block_works() {
-        assert!(validate_start_block("abc".to_string()).is_err());
-        assert!(validate_start_block("1566".to_string()).is_ok());
+        assert_eq!(
+            validate_start_block("18446744073709551615".to_string()),
+            Ok(())
+        );
+        assert_eq!(validate_start_block("1566".to_string()), Ok(()));
+        assert_eq!(validate_start_block("none".to_string()), Ok(()));
+        assert_eq!(validate_start_block("None".to_string()), Ok(()));
+        assert_eq!(validate_start_block("NONE".to_string()), Ok(()));
+        assert_eq!(validate_start_block("nOnE".to_string()), Ok(()));
+        assert_eq!(validate_start_block("latest".to_string()), Ok(()));
+        assert_eq!(validate_start_block("LATEST".to_string()), Ok(()));
+        assert_eq!(validate_start_block("LaTeST".to_string()), Ok(()));
+        assert_eq!(validate_start_block("lATEst".to_string()), Ok(()));
     }
 
     #[test]

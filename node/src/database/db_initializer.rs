@@ -205,13 +205,7 @@ impl DbInitializerReal {
         Self::set_config_value(
             conn,
             "start_block",
-            Some(
-                &external_params
-                    .chain
-                    .rec()
-                    .contract_creation_block
-                    .to_string(),
-            ),
+            None,
             false,
             &format!(
                 "{} start block",
@@ -967,15 +961,7 @@ mod tests {
             Some(&CURRENT_SCHEMA_VERSION.to_string()),
             false,
         );
-        verify(
-            &mut config_vec,
-            "start_block",
-            Some(&format!(
-                "{}",
-                &TEST_DEFAULT_CHAIN.rec().contract_creation_block.to_string()
-            )),
-            false,
-        );
+        verify(&mut config_vec, "start_block", None, false);
         assert_eq!(config_vec, vec![]);
     }
 

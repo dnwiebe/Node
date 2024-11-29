@@ -113,7 +113,7 @@ pub trait PersistentConfiguration {
     fn mapping_protocol(&self) -> Result<Option<AutomapProtocol>, PersistentConfigError>;
     fn set_mapping_protocol(
         &mut self,
-        value: Option<AutomapProtocol>,
+        value_opt: Option<AutomapProtocol>,
     ) -> Result<(), PersistentConfigError>;
     fn min_hops(&self) -> Result<Hops, PersistentConfigError>;
     fn set_min_hops(&mut self, value: Hops) -> Result<(), PersistentConfigError>;
@@ -131,13 +131,13 @@ pub trait PersistentConfiguration {
         node_descriptors_opt: Option<Vec<NodeDescriptor>>,
         db_password: &str,
     ) -> Result<(), PersistentConfigError>;
-    fn start_block(&self) -> Result<u64, PersistentConfigError>;
-    fn set_start_block(&mut self, value: u64) -> Result<(), PersistentConfigError>;
+    fn start_block(&self) -> Result<Option<u64>, PersistentConfigError>;
+    fn set_start_block(&mut self, value_opt: Option<u64>) -> Result<(), PersistentConfigError>;
     fn max_block_count(&self) -> Result<Option<u64>, PersistentConfigError>;
-    fn set_max_block_count(&mut self, value: Option<u64>) -> Result<(), PersistentConfigError>;
+    fn set_max_block_count(&mut self, value_opt: Option<u64>) -> Result<(), PersistentConfigError>;
     fn set_start_block_from_txn(
         &mut self,
-        value: u64,
+        value_opt: Option<u64>,
         transaction: &mut TransactionSafeWrapper,
     ) -> Result<(), PersistentConfigError>;
     fn set_wallet_info(
@@ -335,9 +335,9 @@ impl PersistentConfiguration for PersistentConfigurationReal {
 
     fn set_mapping_protocol(
         &mut self,
-        value: Option<AutomapProtocol>,
+        value_opt: Option<AutomapProtocol>,
     ) -> Result<(), PersistentConfigError> {
-        Ok(self.dao.set("mapping_protocol", value.map(to_string))?)
+        Ok(self.dao.set("mapping_protocol", value_opt.map(to_string))?)
     }
 
     fn min_hops(&self) -> Result<Hops, PersistentConfigError> {
@@ -406,28 +406,28 @@ impl PersistentConfiguration for PersistentConfigurationReal {
         )?)
     }
 
-    fn start_block(&self) -> Result<u64, PersistentConfigError> {
-        self.simple_get_method(decode_u64, "start_block")
+    fn start_block(&self) -> Result<Option<u64>, PersistentConfigError> {
+        Ok(decode_u64(self.get("start_block")?)?)
     }
 
-    fn set_start_block(&mut self, value: u64) -> Result<(), PersistentConfigError> {
-        self.simple_set_method("start_block", value)
+    fn set_start_block(&mut self, value_opt: Option<u64>) -> Result<(), PersistentConfigError> {
+        Ok(self.dao.set("start_block", encode_u64(value_opt)?)?)
     }
 
     fn max_block_count(&self) -> Result<Option<u64>, PersistentConfigError> {
         Ok(decode_u64(self.get("max_block_count")?)?)
     }
 
-    fn set_max_block_count(&mut self, value: Option<u64>) -> Result<(), PersistentConfigError> {
-        Ok(self.dao.set("max_block_count", encode_u64(value)?)?)
+    fn set_max_block_count(&mut self, value_opt: Option<u64>) -> Result<(), PersistentConfigError> {
+        Ok(self.dao.set("max_block_count", encode_u64(value_opt)?)?)
     }
 
     fn set_start_block_from_txn(
         &mut self,
-        value: u64,
+        value_opt: Option<u64>,
         transaction: &mut TransactionSafeWrapper,
     ) -> Result<(), PersistentConfigError> {
-        self.simple_set_method_from_provided_txn("start_block", value, transaction)
+        self.simple_set_method_from_provided_txn("start_block", value_opt, transaction)
     }
 
     fn set_wallet_info(
@@ -568,23 +568,14 @@ impl PersistentConfigurationReal {
     fn simple_set_method_from_provided_txn<T: Display>(
         &mut self,
         parameter_name: &str,
-        value: T,
+        value_opt: Option<T>,
         txn: &mut TransactionSafeWrapper,
     ) -> Result<(), PersistentConfigError> {
-        Ok(self
-            .dao
-            .set_by_guest_transaction(txn, parameter_name, Some(value.to_string()))?)
-    }
-
-    fn simple_get_method<T>(
-        &self,
-        decoder: fn(Option<String>) -> Result<Option<T>, TypedConfigLayerError>,
-        parameter: &str,
-    ) -> Result<T, PersistentConfigError> {
-        match decoder(self.get(parameter)?)? {
-            None => Self::missing_value_panic(parameter),
-            Some(value) => Ok(value),
-        }
+        Ok(self.dao.set_by_guest_transaction(
+            txn,
+            parameter_name,
+            value_opt.map(|v| v.to_string()),
+        )?)
     }
 
     fn combined_params_get_method<'a, T, C>(
@@ -1503,12 +1494,11 @@ mod tests {
 
         let start_block = subject.start_block().unwrap();
 
-        assert_eq!(start_block, 6);
+        assert_eq!(start_block, Some(6));
     }
 
     #[test]
-    #[should_panic(expected = "ever-supplied value missing: start_block; database is corrupt!")]
-    fn start_block_does_not_tolerate_optional_output() {
+    fn start_block_can_be_none() {
         let config_dao = Box::new(ConfigDaoMock::new().get_result(Ok(ConfigDaoRecord::new(
             "start_block",
             None,
@@ -1516,11 +1506,13 @@ mod tests {
         ))));
         let subject = PersistentConfigurationReal::new(config_dao);
 
-        let _ = subject.start_block();
+        let start_block = subject.start_block();
+
+        assert_eq!(start_block, Ok(None));
     }
 
     #[test]
-    fn set_start_block_success() {
+    fn set_start_block_success_with_some() {
         let set_params_arc = Arc::new(Mutex::new(vec![]));
         let config_dao = Box::new(
             ConfigDaoMock::new()
@@ -1529,7 +1521,7 @@ mod tests {
         );
         let mut subject = PersistentConfigurationReal::new(config_dao);
 
-        let result = subject.set_start_block(1234);
+        let result = subject.set_start_block(Some(1234));
 
         assert_eq!(result, Ok(()));
         let set_params = set_params_arc.lock().unwrap();
@@ -1553,7 +1545,7 @@ mod tests {
         let mut txn = TransactionSafeWrapper::new_with_builder(txn_inner_builder);
         let mut subject = PersistentConfigurationReal::new(config_dao);
 
-        let result = subject.set_start_block_from_txn(1234, &mut txn);
+        let result = subject.set_start_block_from_txn(Some(1234), &mut txn);
 
         assert_eq!(result, Ok(()));
         let set_params = set_params_arc.lock().unwrap();
@@ -1561,6 +1553,23 @@ mod tests {
             *set_params,
             vec![(txn_id, "start_block".to_string(), Some("1234".to_string()))]
         )
+    }
+
+    #[test]
+    fn set_start_block_success_with_none() {
+        let set_params_arc = Arc::new(Mutex::new(vec![]));
+        let config_dao = Box::new(
+            ConfigDaoMock::new()
+                .set_params(&set_params_arc)
+                .set_result(Ok(())),
+        );
+        let mut subject = PersistentConfigurationReal::new(config_dao);
+
+        let result = subject.set_start_block(None);
+
+        assert_eq!(result, Ok(()));
+        let set_params = set_params_arc.lock().unwrap();
+        assert_eq!(*set_params, vec![("start_block".to_string(), None)])
     }
 
     #[test]

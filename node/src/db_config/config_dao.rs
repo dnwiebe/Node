@@ -180,7 +180,7 @@ mod tests {
     use crate::database::db_initializer::{DbInitializer, DbInitializerReal};
     use crate::database::test_utils::ConnectionWrapperMock;
     use crate::test_utils::assert_contains;
-    use masq_lib::constants::{CURRENT_SCHEMA_VERSION, ETH_ROPSTEN_CONTRACT_CREATION_BLOCK};
+    use masq_lib::constants::CURRENT_SCHEMA_VERSION;
     use masq_lib::test_utils::utils::ensure_node_home_directory_exists;
     use rusqlite::Connection;
     use std::path::Path;
@@ -201,14 +201,7 @@ mod tests {
                 false,
             ),
         );
-        assert_contains(
-            &result,
-            &ConfigDaoRecord::new(
-                "start_block",
-                Some(&ETH_ROPSTEN_CONTRACT_CREATION_BLOCK.to_string()),
-                false,
-            ),
-        );
+        assert_contains(&result, &ConfigDaoRecord::new("start_block", None, false));
         assert_contains(
             &result,
             &ConfigDaoRecord::new("consuming_wallet_private_key", None, true),
