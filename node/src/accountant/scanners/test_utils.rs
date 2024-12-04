@@ -3,8 +3,16 @@
 #![cfg(test)]
 
 use crate::accountant::db_access_objects::payable_dao::PayableAccount;
+use crate::accountant::PaymentsAndStartBlock;
 use masq_lib::type_obfuscation::Obfuscated;
 
 pub fn protect_payables_in_test(payables: Vec<PayableAccount>) -> Obfuscated {
     Obfuscated::obfuscate_vector(payables)
+}
+
+pub fn make_empty_payments_and_start_block() -> PaymentsAndStartBlock {
+    PaymentsAndStartBlock {
+        payments: vec![],
+        new_start_block: 0,
+    }
 }

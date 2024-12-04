@@ -7,7 +7,6 @@ pub mod automap_mocks;
 pub mod data_hunk;
 pub mod data_hunk_framer;
 pub mod database_utils;
-pub mod http_test_server;
 pub mod little_tcp_server;
 pub mod logfile_name_guard;
 pub mod neighborhood_test_utils;

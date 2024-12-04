@@ -608,7 +608,7 @@ mod tests {
         };
         // Here dispatcher takes what it needs from the BootstrapperConfig
         let (dispatcher_subs, _) =
-            ActorFactoryReal {}.make_and_start_dispatcher(&bootstrapper_config);
+            ActorFactoryReal::new().make_and_start_dispatcher(&bootstrapper_config);
         let peer_actors = peer_actors_builder().ui_gateway(ui_gateway).build();
         dispatcher_subs
             .bind
@@ -653,7 +653,7 @@ mod tests {
         };
         // Here dispatcher doesn't get what it needs from the BootstrapperConfig
         let (dispatcher_subs, _) =
-            ActorFactoryReal {}.make_and_start_dispatcher(&bootstrapper_config);
+            ActorFactoryReal::new().make_and_start_dispatcher(&bootstrapper_config);
         let peer_actors = peer_actors_builder().ui_gateway(ui_gateway).build();
         dispatcher_subs
             .bind
@@ -698,7 +698,7 @@ mod tests {
         };
         // Here dispatcher doesn't get what it needs from the BootstrapperConfig
         let (dispatcher_subs, _) =
-            ActorFactoryReal {}.make_and_start_dispatcher(&bootstrapper_config);
+            ActorFactoryReal::new().make_and_start_dispatcher(&bootstrapper_config);
         let peer_actors = peer_actors_builder().ui_gateway(ui_gateway).build();
         dispatcher_subs
             .bind
@@ -750,7 +750,7 @@ mod tests {
             body: UiDescriptorRequest {}.tmb(4321),
         };
         let (dispatcher_subs, _) =
-            ActorFactoryReal {}.make_and_start_dispatcher(&bootstrapper_config);
+            ActorFactoryReal::new().make_and_start_dispatcher(&bootstrapper_config);
         let peer_actors = peer_actors_builder().ui_gateway(ui_gateway).build();
         dispatcher_subs
             .bind

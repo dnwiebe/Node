@@ -611,7 +611,7 @@ impl Bootstrapper {
     fn start_actors_and_return_shp_subs(&self) -> StreamHandlerPoolSubs {
         self.actor_system_factory.make_and_start_actors(
             self.config.clone(),
-            Box::new(ActorFactoryReal {}),
+            Box::new(ActorFactoryReal::new()),
             initialize_database(
                 &self.config.data_directory,
                 DbInitializationConfig::panic_on_migration(),

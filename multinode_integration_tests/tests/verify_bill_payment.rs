@@ -3,6 +3,7 @@ use bip39::{Language, Mnemonic, Seed};
 use futures::Future;
 use masq_lib::blockchains::chains::Chain;
 use masq_lib::constants::WEIS_IN_GWEI;
+use masq_lib::test_utils::utils::UrlHolder;
 use masq_lib::utils::{derivation_path, NeighborhoodModeLight};
 use multinode_integration_tests_lib::blockchain::BlockchainServer;
 use multinode_integration_tests_lib::masq_node::MASQNode;
@@ -11,7 +12,7 @@ use multinode_integration_tests_lib::masq_real_node::{
     ConsumingWalletInfo, EarningWalletInfo, NodeStartupConfig, NodeStartupConfigBuilder,
 };
 use multinode_integration_tests_lib::utils::{
-    node_chain_specific_data_directory, open_all_file_permissions, UrlHolder,
+    node_chain_specific_data_directory, open_all_file_permissions,
 };
 use node_lib::accountant::db_access_objects::payable_dao::{PayableDao, PayableDaoReal};
 use node_lib::accountant::db_access_objects::receivable_dao::{ReceivableDao, ReceivableDaoReal};
@@ -232,7 +233,7 @@ fn verify_bill_payment() {
     assert_balances(
         &contract_owner_wallet,
         &blockchain_interface,
-        "99998223682000000000",
+        "99995074522000000000",
         "471999999700000000000000000",
     );
 
@@ -316,13 +317,14 @@ fn make_init_config(chain: Chain) -> DbInitializationConfig {
 
 fn assert_balances(
     wallet: &Wallet,
-    blockchain_interface: &BlockchainInterfaceWeb3<Http>,
+    blockchain_interface: &BlockchainInterfaceWeb3,
     expected_eth_balance: &str,
     expected_token_balance: &str,
 ) {
     let eth_balance = blockchain_interface
         .lower_interface()
-        .get_transaction_fee_balance(&wallet)
+        .get_transaction_fee_balance(wallet.address())
+        .wait()
         .unwrap_or_else(|_| panic!("Failed to retrieve gas balance for {}", wallet));
     assert_eq!(
         format!("{}", eth_balance),
@@ -333,7 +335,8 @@ fn assert_balances(
     );
     let token_balance = blockchain_interface
         .lower_interface()
-        .get_service_fee_balance(&wallet)
+        .get_service_fee_balance(wallet.address())
+        .wait()
         .unwrap_or_else(|_| panic!("Failed to retrieve masq balance for {}", wallet));
     assert_eq!(
         token_balance,

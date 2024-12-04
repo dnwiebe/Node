@@ -6,6 +6,7 @@ use crate::accountant::db_access_objects::utils::{
 use crate::accountant::db_big_integer::big_int_divider::BigIntDivider;
 use crate::accountant::{checked_conversion, comma_joined_stringifiable};
 use crate::blockchain::blockchain_bridge::PendingPayableFingerprint;
+use crate::blockchain::blockchain_interface::blockchain_interface_web3::HashAndAmount;
 use crate::database::rusqlite_wrappers::ConnectionWrapper;
 use crate::sub_lib::wallet::Wallet;
 use masq_lib::utils::ExpectValue;
@@ -38,7 +39,7 @@ pub trait PendingPayableDao {
     fn return_all_errorless_fingerprints(&self) -> Vec<PendingPayableFingerprint>;
     fn insert_new_fingerprints(
         &self,
-        hashes_and_amounts: &[(H256, u128)],
+        hashes_and_amounts: &[HashAndAmount],
         batch_wide_timestamp: SystemTime,
     ) -> Result<(), PendingPayableDaoError>;
     fn delete_fingerprints(&self, ids: &[u64]) -> Result<(), PendingPayableDaoError>;
@@ -125,20 +126,20 @@ impl PendingPayableDao for PendingPayableDaoReal<'_> {
 
     fn insert_new_fingerprints(
         &self,
-        hashes_and_amounts: &[(H256, u128)],
+        hashes_and_amounts: &[HashAndAmount],
         batch_wide_timestamp: SystemTime,
     ) -> Result<(), PendingPayableDaoError> {
         fn values_clause_for_fingerprints_to_insert(
-            hashes_and_amounts: &[(H256, u128)],
+            hashes_and_amounts: &[HashAndAmount],
             batch_wide_timestamp: SystemTime,
         ) -> String {
             let time_t = to_time_t(batch_wide_timestamp);
-            comma_joined_stringifiable(hashes_and_amounts, |(hash, amount)| {
-                let amount_checked = checked_conversion::<u128, i128>(*amount);
+            comma_joined_stringifiable(hashes_and_amounts, |hash_and_amount| {
+                let amount_checked = checked_conversion::<u128, i128>(hash_and_amount.amount);
                 let (high_bytes, low_bytes) = BigIntDivider::deconstruct(amount_checked);
                 format!(
                     "('{:?}', {}, {}, {}, 1, null)",
-                    hash, high_bytes, low_bytes, time_t
+                    hash_and_amount.hash, high_bytes, low_bytes, time_t
                 )
             })
         }
@@ -277,6 +278,7 @@ mod tests {
     use crate::accountant::db_access_objects::utils::from_time_t;
     use crate::accountant::db_big_integer::big_int_divider::BigIntDivider;
     use crate::blockchain::blockchain_bridge::PendingPayableFingerprint;
+    use crate::blockchain::blockchain_interface::blockchain_interface_web3::HashAndAmount;
     use crate::blockchain::test_utils::make_tx_hash;
     use crate::database::db_initializer::{
         DbInitializationConfig, DbInitializer, DbInitializerReal, DATABASE_FILE,
@@ -304,10 +306,18 @@ mod tests {
         let amount_2 = 44445;
         let batch_wide_timestamp = from_time_t(200_000_000);
         let subject = PendingPayableDaoReal::new(wrapped_conn);
+        let hash_and_amount_1 = HashAndAmount {
+            hash: hash_1,
+            amount: amount_1,
+        };
+        let hash_and_amount_2 = HashAndAmount {
+            hash: hash_2,
+            amount: amount_2,
+        };
 
         let _ = subject
             .insert_new_fingerprints(
-                &[(hash_1, amount_1), (hash_2, amount_2)],
+                &[hash_and_amount_1, hash_and_amount_2],
                 batch_wide_timestamp,
             )
             .unwrap();
@@ -319,17 +329,17 @@ mod tests {
                 PendingPayableFingerprint {
                     rowid: 1,
                     timestamp: batch_wide_timestamp,
-                    hash: hash_1,
+                    hash: hash_and_amount_1.hash,
                     attempt: 1,
-                    amount: amount_1,
+                    amount: hash_and_amount_1.amount,
                     process_error: None
                 },
                 PendingPayableFingerprint {
                     rowid: 2,
                     timestamp: batch_wide_timestamp,
-                    hash: hash_2,
+                    hash: hash_and_amount_2.hash,
                     attempt: 1,
-                    amount: amount_2,
+                    amount: hash_and_amount_2.amount,
                     process_error: None
                 }
             ]
@@ -357,8 +367,9 @@ mod tests {
         let amount = 55556;
         let timestamp = from_time_t(200_000_000);
         let subject = PendingPayableDaoReal::new(Box::new(wrapped_conn));
+        let hash_and_amount = HashAndAmount { hash, amount };
 
-        let result = subject.insert_new_fingerprints(&[(hash, amount)], timestamp);
+        let result = subject.insert_new_fingerprints(&[hash_and_amount], timestamp);
 
         assert_eq!(
             result,
@@ -385,8 +396,12 @@ mod tests {
         let amount_1 = 55556;
         let batch_wide_timestamp = from_time_t(200_000_000);
         let subject = PendingPayableDaoReal::new(Box::new(wrapped_conn));
+        let hash_and_amount = HashAndAmount {
+            hash: hash_1,
+            amount: amount_1,
+        };
 
-        let _ = subject.insert_new_fingerprints(&[(hash_1, amount_1)], batch_wide_timestamp);
+        let _ = subject.insert_new_fingerprints(&[hash_and_amount], batch_wide_timestamp);
     }
 
     #[test]
@@ -408,7 +423,15 @@ mod tests {
         let hash_2 =
             H256::from_str("5a2909e7bb71943c82a94d9beb04e230351541fc14619ee8bb9b7372ea88ba39")
                 .unwrap();
-        let fingerprints_init_input = vec![(hash_1, 4567), (hash_2, 6789)];
+        let hash_and_amount_1 = HashAndAmount {
+            hash: hash_1,
+            amount: 4567,
+        };
+        let hash_and_amount_2 = HashAndAmount {
+            hash: hash_2,
+            amount: 6789,
+        };
+        let fingerprints_init_input = vec![hash_and_amount_1, hash_and_amount_2];
         {
             subject
                 .insert_new_fingerprints(&fingerprints_init_input, timestamp)
@@ -452,10 +475,22 @@ mod tests {
         // this test, and in the end, I delete the first one. It leaves a single record still in but with the rowid 2 instead of
         // just an ambiguous 1
         subject
-            .insert_new_fingerprints(&[(hash_2, 8901234)], SystemTime::now())
+            .insert_new_fingerprints(
+                &[HashAndAmount {
+                    hash: hash_2,
+                    amount: 8901234,
+                }],
+                SystemTime::now(),
+            )
             .unwrap();
         subject
-            .insert_new_fingerprints(&[(hash_3, 1234567)], SystemTime::now())
+            .insert_new_fingerprints(
+                &[HashAndAmount {
+                    hash: hash_3,
+                    amount: 1234567,
+                }],
+                SystemTime::now(),
+            )
             .unwrap();
         subject.delete_fingerprints(&[1]).unwrap();
 
@@ -480,10 +515,19 @@ mod tests {
         let amount_1 = 787;
         let hash_2 = make_tx_hash(10000);
         let amount_2 = 333;
+        let hash_and_amount_1 = HashAndAmount {
+            hash: hash_1,
+            amount: amount_1,
+        };
+        let hash_and_amount_2 = HashAndAmount {
+            hash: hash_2,
+            amount: amount_2,
+        };
+
         {
             subject
                 .insert_new_fingerprints(
-                    &[(hash_1, amount_1), (hash_2, amount_2)],
+                    &[hash_and_amount_1, hash_and_amount_2],
                     batch_wide_timestamp,
                 )
                 .unwrap();
@@ -527,9 +571,14 @@ mod tests {
         let timestamp = from_time_t(198_000_000);
         let hash = make_tx_hash(10000);
         let amount = 333;
+        let hash_and_amount_1 = HashAndAmount {
+            hash: make_tx_hash(11119),
+            amount: 2000,
+        };
+        let hash_and_amount_2 = HashAndAmount { hash, amount };
         {
             subject
-                .insert_new_fingerprints(&[(make_tx_hash(11119), 2000), (hash, amount)], timestamp)
+                .insert_new_fingerprints(&[hash_and_amount_1, hash_and_amount_2], timestamp)
                 .unwrap();
             subject.mark_failures(&[1]).unwrap();
         }
@@ -589,9 +638,18 @@ mod tests {
             subject
                 .insert_new_fingerprints(
                     &[
-                        (make_tx_hash(1234), 1111),
-                        (make_tx_hash(2345), 5555),
-                        (make_tx_hash(3456), 2222),
+                        HashAndAmount {
+                            hash: make_tx_hash(1234),
+                            amount: 1111,
+                        },
+                        HashAndAmount {
+                            hash: make_tx_hash(2345),
+                            amount: 5555,
+                        },
+                        HashAndAmount {
+                            hash: make_tx_hash(3456),
+                            amount: 2222,
+                        },
                     ],
                     SystemTime::now(),
                 )
@@ -655,7 +713,13 @@ mod tests {
         let subject = PendingPayableDaoReal::new(conn);
         {
             subject
-                .insert_new_fingerprints(&[(make_tx_hash(666666), 5555)], SystemTime::now())
+                .insert_new_fingerprints(
+                    &[HashAndAmount {
+                        hash: make_tx_hash(666666),
+                        amount: 5555,
+                    }],
+                    SystemTime::now(),
+                )
                 .unwrap();
         }
 
@@ -674,12 +738,24 @@ mod tests {
         let hash_1 = make_tx_hash(345);
         let hash_2 = make_tx_hash(456);
         let hash_3 = make_tx_hash(567);
+        let hash_and_amount_1 = HashAndAmount {
+            hash: hash_1,
+            amount: 1122,
+        };
+        let hash_and_amount_2 = HashAndAmount {
+            hash: hash_2,
+            amount: 2233,
+        };
+        let hash_and_amount_3 = HashAndAmount {
+            hash: hash_3,
+            amount: 3344,
+        };
         let timestamp = from_time_t(190_000_000);
         let subject = PendingPayableDaoReal::new(conn);
         {
             subject
                 .insert_new_fingerprints(
-                    &[(hash_1, 1122), (hash_2, 2233), (hash_3, 3344)],
+                    &[hash_and_amount_1, hash_and_amount_2, hash_and_amount_3],
                     timestamp,
                 )
                 .unwrap();
@@ -758,11 +834,19 @@ mod tests {
         let amount_1 = 1234;
         let hash_2 = make_tx_hash(666);
         let amount_2 = 2345;
+        let hash_and_amount_1 = HashAndAmount {
+            hash: hash_1,
+            amount: amount_1,
+        };
+        let hash_and_amount_2 = HashAndAmount {
+            hash: hash_2,
+            amount: amount_2,
+        };
         let timestamp = from_time_t(190_000_000);
         let subject = PendingPayableDaoReal::new(conn);
         {
             subject
-                .insert_new_fingerprints(&[(hash_1, amount_1), (hash_2, amount_2)], timestamp)
+                .insert_new_fingerprints(&[hash_and_amount_1, hash_and_amount_2], timestamp)
                 .unwrap();
         }
 

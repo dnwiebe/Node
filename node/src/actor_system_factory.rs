@@ -308,7 +308,7 @@ impl ActorSystemFactoryToolsReal {
                 AutomapChange::NewIp(new_public_ip) => {
                     exit_process(
                         1,
-                        format! ("IP change to {} reported from ISP. We can't handle that until GH-499. Going down...", new_public_ip).as_str()
+                        format!("IP change to {} reported from ISP. We can't handle that until GH-499. Going down...", new_public_ip).as_str(),
                     );
                 }
                 AutomapChange::Error(e) => Self::handle_housekeeping_thread_error(e),
@@ -378,7 +378,17 @@ pub trait ActorFactory {
     fn make_and_start_configurator(&self, config: &BootstrapperConfig) -> ConfiguratorSubs;
 }
 
-pub struct ActorFactoryReal {}
+pub struct ActorFactoryReal {
+    logger: Logger,
+}
+
+impl ActorFactoryReal {
+    pub fn new() -> Self {
+        Self {
+            logger: Logger::new("ActorFactory"),
+        }
+    }
+}
 
 impl ActorFactory for ActorFactoryReal {
     fn make_and_start_dispatcher(
@@ -509,10 +519,12 @@ impl ActorFactory for ActorFactoryReal {
         let data_directory = config.data_directory.clone();
         let chain = config.blockchain_bridge_config.chain;
         let arbiter = Arbiter::builder().stop_system_on_panic(true);
+        let logger = self.logger.clone();
         let addr: Addr<BlockchainBridge> = arbiter.start(move |_| {
             let blockchain_interface = BlockchainBridge::initialize_blockchain_interface(
                 blockchain_service_url_opt,
                 chain,
+                logger,
             );
             let persistent_config =
                 BlockchainBridge::initialize_persistent_configuration(&data_directory);
@@ -623,9 +635,13 @@ where
 mod tests {
     use super::*;
     use crate::accountant::exportable_test_parts::test_accountant_is_constructed_with_upgraded_db_connection_recognizing_our_extra_sqlite_functions;
-    use crate::accountant::DEFAULT_PENDING_TOO_LONG_SEC;
-    use crate::blockchain::blockchain_bridge::exportable_test_parts::test_blockchain_bridge_is_constructed_with_correctly_functioning_connections;
+    use crate::accountant::{
+        PaymentsAndStartBlock, ReceivedPayments, DEFAULT_PENDING_TOO_LONG_SEC,
+    };
+    use crate::blockchain::blockchain_bridge::RetrieveTransactions;
+    use crate::blockchain::blockchain_interface::data_structures::BlockchainTransaction;
     use crate::bootstrapper::{Bootstrapper, RealUser};
+    use crate::db_config::persistent_configuration::PersistentConfigurationReal;
     use crate::node_test_utils::{
         make_stream_handler_pool_subs_from_recorder, start_recorder_refcell_opt,
     };
@@ -641,6 +657,7 @@ mod tests {
     use crate::sub_lib::peer_actors::StartMessage;
     use crate::sub_lib::stream_handler_pool::TransmitDataMsg;
     use crate::sub_lib::ui_gateway::UiGatewayConfig;
+    use crate::sub_lib::wallet::Wallet;
     use crate::test_utils::actor_system_factory::BannedCacheLoaderMock;
     use crate::test_utils::automap_mocks::{AutomapControlFactoryMock, AutomapControlMock};
     use crate::test_utils::make_wallet;
@@ -650,9 +667,11 @@ mod tests {
         make_accountant_subs_from_recorder, make_blockchain_bridge_subs_from_recorder,
         make_configurator_subs_from_recorder, make_hopper_subs_from_recorder,
         make_neighborhood_subs_from_recorder, make_proxy_client_subs_from_recorder,
-        make_proxy_server_subs_from_recorder, make_ui_gateway_subs_from_recorder, Recording,
+        make_proxy_server_subs_from_recorder, make_ui_gateway_subs_from_recorder,
+        peer_actors_builder, Recording,
     };
     use crate::test_utils::recorder::{make_recorder, Recorder};
+    use crate::test_utils::recorder_stop_conditions::{StopCondition, StopConditions};
     use crate::test_utils::unshared_test_utils::arbitrary_id_stamp::ArbitraryIdStamp;
     use crate::test_utils::unshared_test_utils::system_killer_actor::SystemKillerActor;
     use crate::test_utils::unshared_test_utils::{
@@ -660,24 +679,30 @@ mod tests {
     };
     use crate::test_utils::{alias_cryptde, rate_pack};
     use crate::test_utils::{main_cryptde, make_cryptde_pair};
-    use crate::{hopper, proxy_client, proxy_server, stream_handler_pool, ui_gateway};
+    use crate::{
+        hopper, match_every_type_id, proxy_client, proxy_server, stream_handler_pool, ui_gateway,
+    };
     use actix::{Actor, Arbiter, System};
     use automap_lib::control_layer::automap_control::AutomapChange;
     #[cfg(all(test, not(feature = "no_test_share")))]
     use automap_lib::mocks::{
         parameterizable_automap_control, TransactorMock, PUBLIC_IP, ROUTER_IP,
     };
-    use crossbeam_channel::unbounded;
+    use core::any::TypeId;
+    use crossbeam_channel::{bounded, unbounded};
     use log::LevelFilter;
     use masq_lib::constants::DEFAULT_CHAIN;
     use masq_lib::crash_point::CrashPoint;
     #[cfg(feature = "log_recipient_test")]
     use masq_lib::logger::INITIALIZATION_COUNTER;
     use masq_lib::messages::{ToMessageBody, UiCrashRequest, UiDescriptorRequest};
-    use masq_lib::test_utils::utils::{ensure_node_home_directory_exists, TEST_DEFAULT_CHAIN};
+    use masq_lib::test_utils::mock_blockchain_client_server::MBCSBuilder;
+    use masq_lib::test_utils::utils::{
+        ensure_node_home_directory_exists, LogObject, TEST_DEFAULT_CHAIN,
+    };
     use masq_lib::ui_gateway::NodeFromUiMessage;
-    use masq_lib::utils::running_test;
     use masq_lib::utils::AutomapProtocol::Igdp;
+    use masq_lib::utils::{find_free_port, running_test};
     use std::cell::RefCell;
     use std::collections::HashMap;
     use std::convert::TryFrom;
@@ -1050,7 +1075,7 @@ mod tests {
         };
         let main_cryptde_public_key_expected = pk_from_cryptde_null(main_cryptde);
         let alias_cryptde_public_key_expected = pk_from_cryptde_null(alias_cryptde);
-        let actor_factory = Box::new(ActorFactoryReal {});
+        let actor_factory = Box::new(ActorFactoryReal::new());
         let actor_factory_raw_address_expected = addr_of!(*actor_factory);
         let persistent_config_expected_arbitrary_id = ArbitraryIdStamp::new();
         let persistent_config = Box::new(
@@ -1236,7 +1261,7 @@ mod tests {
             earning_wallet: make_wallet("earning"),
             consuming_wallet_opt: Some(make_wallet("consuming")),
             data_directory: PathBuf::new(),
-            node_descriptor: NodeDescriptor::try_from ((main_cryptde(), "masq://polygon-mainnet:OHsC2CAm4rmfCkaFfiynwxflUgVTJRb2oY5mWxNCQkY@172.50.48.6:9342")).unwrap(),
+            node_descriptor: NodeDescriptor::try_from((main_cryptde(), "masq://polygon-mainnet:OHsC2CAm4rmfCkaFfiynwxflUgVTJRb2oY5mWxNCQkY@172.50.48.6:9342")).unwrap(),
             main_cryptde_null_opt: None,
             alias_cryptde_null_opt: None,
             mapping_protocol_opt: Some(AutomapProtocol::Igdp),
@@ -1250,7 +1275,7 @@ mod tests {
                 min_hops: MIN_HOPS_FOR_TEST,
             },
             payment_thresholds_opt: Default::default(),
-            when_pending_too_long_sec: DEFAULT_PENDING_TOO_LONG_SEC
+            when_pending_too_long_sec: DEFAULT_PENDING_TOO_LONG_SEC,
         };
         let add_mapping_params_arc = Arc::new(Mutex::new(vec![]));
         let mut subject = make_subject_with_null_setter();
@@ -1337,7 +1362,7 @@ mod tests {
         let dispatcher_param = Parameters::get(parameters.dispatcher_params);
         assert_eq!(
             dispatcher_param.node_descriptor,
-            NodeDescriptor::try_from ((main_cryptde(), "masq://polygon-mainnet:OHsC2CAm4rmfCkaFfiynwxflUgVTJRb2oY5mWxNCQkY@172.50.48.6:9342")).unwrap()
+            NodeDescriptor::try_from((main_cryptde(), "masq://polygon-mainnet:OHsC2CAm4rmfCkaFfiynwxflUgVTJRb2oY5mWxNCQkY@172.50.48.6:9342")).unwrap()
         );
         let blockchain_bridge_param = Parameters::get(parameters.blockchain_bridge_params);
         assert_eq!(
@@ -1549,7 +1574,7 @@ mod tests {
                 min_hops: MIN_HOPS_FOR_TEST,
             },
             payment_thresholds_opt: Default::default(),
-            when_pending_too_long_sec: DEFAULT_PENDING_TOO_LONG_SEC
+            when_pending_too_long_sec: DEFAULT_PENDING_TOO_LONG_SEC,
         };
         let system = System::new("MASQNode");
         let mut subject = make_subject_with_null_setter();
@@ -1762,7 +1787,7 @@ mod tests {
         let closure = || {
             let mut bootstrapper_config = BootstrapperConfig::default();
             bootstrapper_config.crash_point = CrashPoint::Message;
-            let subscribers = ActorFactoryReal {}
+            let subscribers = ActorFactoryReal::new()
                 .make_and_start_proxy_server(make_cryptde_pair(), &bootstrapper_config);
             subscribers.node_from_ui
         };
@@ -1783,7 +1808,7 @@ mod tests {
                 crashable: true,
                 exit_byte_rate: 50,
             };
-            let subscribers = ActorFactoryReal {}.make_and_start_proxy_client(proxy_cl_config);
+            let subscribers = ActorFactoryReal::new().make_and_start_proxy_client(proxy_cl_config);
             subscribers.node_from_ui
         };
 
@@ -1800,7 +1825,7 @@ mod tests {
                 is_decentralized: false,
                 crashable: true,
             };
-            let subscribers = ActorFactoryReal {}.make_and_start_hopper(hopper_config);
+            let subscribers = ActorFactoryReal::new().make_and_start_hopper(hopper_config);
             subscribers.node_from_ui
         };
 
@@ -1812,7 +1837,8 @@ mod tests {
         let closure = || {
             let mut bootstrapper_config = BootstrapperConfig::default();
             bootstrapper_config.crash_point = CrashPoint::Message;
-            let subscribers = ActorFactoryReal {}.make_and_start_ui_gateway(&bootstrapper_config);
+            let subscribers =
+                ActorFactoryReal::new().make_and_start_ui_gateway(&bootstrapper_config);
             subscribers.node_from_ui_message_sub
         };
 
@@ -1825,7 +1851,7 @@ mod tests {
             let mut bootstrapper_config = BootstrapperConfig::default();
             bootstrapper_config.crash_point = CrashPoint::Message;
             let subscribers =
-                ActorFactoryReal {}.make_and_start_stream_handler_pool(&bootstrapper_config);
+                ActorFactoryReal::new().make_and_start_stream_handler_pool(&bootstrapper_config);
             subscribers.node_from_ui_sub
         };
 
@@ -1948,7 +1974,7 @@ mod tests {
 
         let _ = subject.make_and_start_actors(
             bootstrapper_config,
-            Box::new(ActorFactoryReal {}),
+            Box::new(ActorFactoryReal::new()),
             Box::new(persistent_config),
         );
     }
@@ -1960,7 +1986,7 @@ mod tests {
                    db_initializer: DbInitializerReal,
                    banned_cache_loader: BannedCacheLoaderMock,
                    address_leaker: SubsFactoryTestAddrLeaker<Accountant>| {
-            ActorFactoryReal {}.make_and_start_accountant(
+            ActorFactoryReal::new().make_and_start_accountant(
                 bootstrapper_config,
                 &db_initializer,
                 &banned_cache_loader,
@@ -1977,17 +2003,88 @@ mod tests {
 
     #[test]
     fn blockchain_bridge_is_constructed_with_correctly_functioning_connections() {
-        let act = |bootstrapper_config: BootstrapperConfig,
-                   address_leaker: SubsFactoryTestAddrLeaker<BlockchainBridge>| {
-            ActorFactoryReal {}
-                .make_and_start_blockchain_bridge(&bootstrapper_config, &address_leaker)
+        let test_name = "blockchain_bridge_is_constructed_with_correctly_functioning_connections";
+        let data_dir = ensure_node_home_directory_exists("actor_system_factory", test_name);
+        let port = find_free_port();
+        let _blockchain_client_server = MBCSBuilder::new(port)
+            .response("0x3B9ACA00".to_string(), 0)
+            .response(
+                vec![LogObject {
+                    removed: false,
+                    log_index: Some("0x20".to_string()),
+                    transaction_index: Some("0x30".to_string()),
+                    transaction_hash: Some(
+                        "0x2222222222222222222222222222222222222222222222222222222222222222"
+                            .to_string(),
+                    ),
+                    block_hash: Some(
+                        "0x1111111111111111111111111111111111111111111111111111111111111111"
+                            .to_string(),
+                    ),
+                    block_number: Some("0x7D0".to_string()), // 2000 decimal
+                    address: "0x3333333333333333333333333333333333333334".to_string(),
+                    data: "0x000000000000000000000000000000000000000000000000000000003b5dc100"
+                        .to_string(),
+                    topics: vec![
+                        "0xddf252ad1be2c89b69c2b0680000000000006561726e696e675f77616c6c6574"
+                            .to_string(),
+                        "0xddf252ad1be2c89b69c2b0690000000000006561726e696e675f77616c6c6574"
+                            .to_string(),
+                    ],
+                }],
+                1,
+            )
+            .start();
+        let server_url = format!("http://{}:{}", &Ipv4Addr::LOCALHOST, port);
+        let _persistent_config = {
+            let conn = DbInitializerReal::default()
+                .initialize(&data_dir, DbInitializationConfig::test_default())
+                .unwrap();
+            PersistentConfigurationReal::from(conn)
         };
+        let wallet = make_wallet("abc");
+        let mut bootstrapper_config = BootstrapperConfig::new();
+        bootstrapper_config
+            .blockchain_bridge_config
+            .blockchain_service_url_opt = Some(server_url);
+        bootstrapper_config.blockchain_bridge_config.chain = TEST_DEFAULT_CHAIN;
+        bootstrapper_config.data_directory = data_dir.clone();
+        let system = System::new(test_name);
+        let (accountant, _, accountant_recording) = make_recorder();
+        let accountant = accountant.system_stop_conditions(match_every_type_id!(ReceivedPayments));
+        let peer_actors = peer_actors_builder().accountant(accountant).build();
+        let (tx, blockchain_bridge_addr_rx) = bounded(1);
+        let address_leaker = SubsFactoryTestAddrLeaker { address_leaker: tx };
 
-        test_blockchain_bridge_is_constructed_with_correctly_functioning_connections(
-            "actor_system_factory",
-            "blockchain_bridge_is_constructed_with_correctly_functioning_connections",
-            act,
-        )
+        ActorFactoryReal::new()
+            .make_and_start_blockchain_bridge(&bootstrapper_config, &address_leaker);
+
+        let blockchain_bridge_addr = blockchain_bridge_addr_rx.try_recv().unwrap();
+        blockchain_bridge_addr
+            .try_send(BindMessage {
+                peer_actors: peer_actors,
+            })
+            .unwrap();
+        blockchain_bridge_addr
+            .try_send(RetrieveTransactions {
+                recipient: wallet.clone(),
+                response_skeleton_opt: None,
+            })
+            .unwrap();
+        assert_eq!(system.run(), 0);
+        let recording = accountant_recording.lock().unwrap();
+        let received_payments_message = recording.get_record::<ReceivedPayments>(0);
+        assert_eq!(
+            received_payments_message.payments_and_start_block,
+            PaymentsAndStartBlock {
+                payments: vec![BlockchainTransaction {
+                    block_number: 2000,
+                    from: Wallet::new("0x0000000000006561726e696e675f77616c6c6574"),
+                    wei_amount: 996000000
+                }],
+                new_start_block: 1000000000
+            }
+        );
     }
 
     #[test]
