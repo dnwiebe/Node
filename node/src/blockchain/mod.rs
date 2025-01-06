@@ -4,7 +4,6 @@ pub mod bip39;
 pub mod blockchain_bridge;
 pub mod blockchain_interface;
 pub mod blockchain_interface_initializer;
-mod blockchain_interface_utils;
 pub mod payer;
 pub mod signature;
 #[cfg(test)]

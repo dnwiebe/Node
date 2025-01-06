@@ -8,7 +8,6 @@ use crate::sub_lib::wallet::Wallet;
 use crate::test_utils::unshared_test_utils::arbitrary_id_stamp::ArbitraryIdStamp;
 use crate::{arbitrary_id_stamp_in_trait_impl, set_arbitrary_id_stamp_in_mock_impl};
 use masq_lib::blockchains::chains::Chain;
-use masq_lib::test_utils::utils::TEST_DEFAULT_CHAIN;
 use std::cell::RefCell;
 
 pub struct BlockchainAgentMock {
@@ -26,7 +25,7 @@ impl Default for BlockchainAgentMock {
             agreed_fee_per_computation_unit_results: RefCell::new(vec![]),
             consuming_wallet_result_opt: None,
             arbitrary_id_stamp_opt: None,
-            get_chain_result_opt: Some(TEST_DEFAULT_CHAIN),
+            get_chain_result_opt: None,
         }
     }
 }

@@ -102,6 +102,7 @@ mod tests {
             subject.consuming_wallet_balances(),
             consuming_wallet_balances
         );
+        assert_eq!(subject.get_chain(), TEST_DEFAULT_CHAIN);
     }
 
     #[test]

@@ -14,27 +14,45 @@ use web3::{Error, Web3};
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum TransactionReceiptResult {
-    NotPresent,
-    Found(TxReceipt),
-    TransactionFailed(TxReceipt),
+    RpcResponse(TxReceipt),
     LocalError(String),
+}
+
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub enum TxStatus {
+    Failed,
+    Pending,
+    Succeeded(TransactionBlock),
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct TxReceipt {
     pub transaction_hash: H256,
-    pub block_hash: Option<H256>,
-    pub block_number: Option<U64>,
-    pub status: Option<bool>,
+    pub status: TxStatus,
+}
+
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct TransactionBlock {
+    pub block_hash: H256,
+    pub block_number: U64,
 }
 
 impl From<TransactionReceipt> for TxReceipt {
     fn from(receipt: TransactionReceipt) -> Self {
+        let status = match (receipt.status, receipt.block_hash, receipt.block_number) {
+            (Some(status), Some(block_hash), Some(block_number)) if status == U64::from(1) => {
+                TxStatus::Succeeded(TransactionBlock {
+                    block_hash,
+                    block_number,
+                })
+            }
+            (Some(status), _, _) if status == U64::from(0) => TxStatus::Failed,
+            _ => TxStatus::Pending,
+        };
+
         TxReceipt {
             transaction_hash: receipt.transaction_hash,
-            block_hash: receipt.block_hash,
-            block_number: receipt.block_number,
-            status: receipt.status.map(|s| s == U64::from(1)),
+            status,
         }
     }
 }
@@ -164,13 +182,14 @@ mod tests {
     use masq_lib::test_utils::mock_blockchain_client_server::MBCSBuilder;
     use masq_lib::utils::find_free_port;
     use std::str::FromStr;
-    use web3::types::{BlockNumber, Bytes, FilterBuilder, Log, U256};
+    use web3::types::{BlockNumber, Bytes, FilterBuilder, Log, TransactionReceipt, U256};
+    use crate::blockchain::blockchain_interface::blockchain_interface_web3::lower_level_interface_web3::{TxReceipt, TxStatus};
 
     #[test]
     fn get_transaction_fee_balance_works() {
         let port = find_free_port();
         let _blockchain_client_server = MBCSBuilder::new(port)
-            .response("0x23".to_string(), 1)
+            .ok_response("0x23".to_string(), 1)
             .start();
         let wallet = &Wallet::from_str("0x3f69f9efd4f2592fd70be8c32ecd9dce71c472fc").unwrap();
         let subject = make_blockchain_interface_web3(port);
@@ -188,7 +207,7 @@ mod tests {
     ) {
         let port = find_free_port();
         let _blockchain_client_server = MBCSBuilder::new(port)
-            .response("0xFFFQ".to_string(), 0)
+            .ok_response("0xFFFQ".to_string(), 0)
             .start();
         let subject = make_blockchain_interface_web3(port);
 
@@ -213,7 +232,7 @@ mod tests {
     fn get_gas_price_works() {
         let port = find_free_port();
         let _blockchain_client_server = MBCSBuilder::new(port)
-            .response("0x01".to_string(), 1)
+            .ok_response("0x01".to_string(), 1)
             .start();
         let subject = make_blockchain_interface_web3(port);
 
@@ -244,7 +263,7 @@ mod tests {
     fn get_block_number_works() {
         let port = find_free_port();
         let _blockchain_client_server = MBCSBuilder::new(port)
-            .response("0x23".to_string(), 1)
+            .ok_response("0x23".to_string(), 1)
             .start();
         let subject = make_blockchain_interface_web3(port);
 
@@ -257,7 +276,7 @@ mod tests {
     fn get_block_number_returns_an_error() {
         let port = find_free_port();
         let _blockchain_client_server = MBCSBuilder::new(port)
-            .response("trash".to_string(), 1)
+            .ok_response("trash".to_string(), 1)
             .start();
         let subject = make_blockchain_interface_web3(port);
 
@@ -279,7 +298,7 @@ mod tests {
     fn get_transaction_id_works() {
         let port = find_free_port();
         let _blockchain_client_server = MBCSBuilder::new(port)
-            .response("0x23".to_string(), 1)
+            .ok_response("0x23".to_string(), 1)
             .start();
         let subject = make_blockchain_interface_web3(port);
         let wallet = &Wallet::from_str("0x3f69f9efd4f2592fd70be8c32ecd9dce71c472fc").unwrap();
@@ -296,7 +315,7 @@ mod tests {
     fn get_transaction_id_returns_an_error_for_unintelligible_response() {
         let port = find_free_port();
         let _blockchain_client_server = MBCSBuilder::new(port)
-            .response("0xFFFQ".to_string(), 0)
+            .ok_response("0xFFFQ".to_string(), 0)
             .start();
         let subject = make_blockchain_interface_web3(port);
 
@@ -321,7 +340,7 @@ mod tests {
     fn get_token_balance_can_retrieve_token_balance_of_a_wallet() {
         let port = find_free_port();
         let _blockchain_client_server = MBCSBuilder::new(port)
-            .response(
+            .ok_response(
                 "0x000000000000000000000000000000000000000000000000000000000000FFFF".to_string(),
                 0,
             )
@@ -345,7 +364,7 @@ mod tests {
     fn get_token_balance_returns_error_for_unintelligible_response_to_token_balance() {
         let port = find_free_port();
         let _blockchain_client_server = MBCSBuilder::new(port)
-            .response(
+            .ok_response(
                 "0x000000000000000000000000000000000000000000000000000000000000FFFQ".to_string(),
                 0,
             )
@@ -523,5 +542,94 @@ mod tests {
                     .to_string()
             )
         );
+    }
+
+    #[test]
+    fn transaction_receipt_can_be_converted_to_successful_transaction() {
+        let tx_receipt: TxReceipt = create_tx_receipt(
+            Some(U64::from(1)),
+            Some(H256::from_low_u64_be(0x1234)),
+            Some(U64::from(10)),
+            H256::from_low_u64_be(0x5678),
+        );
+
+        assert_eq!(tx_receipt.transaction_hash, H256::from_low_u64_be(0x5678));
+        match tx_receipt.status {
+            TxStatus::Succeeded(ref block) => {
+                assert_eq!(block.block_hash, H256::from_low_u64_be(0x1234));
+                assert_eq!(block.block_number, U64::from(10));
+            }
+            _ => panic!("Expected status to be Succeeded"),
+        }
+    }
+
+    #[test]
+    fn transaction_receipt_can_be_converted_to_failed_transaction() {
+        let tx_receipt: TxReceipt = create_tx_receipt(
+            Some(U64::from(0)),
+            None,
+            None,
+            H256::from_low_u64_be(0x5678),
+        );
+
+        assert_eq!(tx_receipt.transaction_hash, H256::from_low_u64_be(0x5678));
+        assert_eq!(tx_receipt.status, TxStatus::Failed);
+    }
+
+    #[test]
+    fn transaction_receipt_can_be_converted_to_pending_transaction_no_status() {
+        let tx_receipt: TxReceipt =
+            create_tx_receipt(None, None, None, H256::from_low_u64_be(0x5678));
+
+        assert_eq!(tx_receipt.transaction_hash, H256::from_low_u64_be(0x5678));
+        assert_eq!(tx_receipt.status, TxStatus::Pending);
+    }
+
+    #[test]
+    fn transaction_receipt_can_be_converted_to_pending_transaction_no_block_info() {
+        let tx_receipt: TxReceipt = create_tx_receipt(
+            Some(U64::from(1)),
+            None,
+            None,
+            H256::from_low_u64_be(0x5678),
+        );
+
+        assert_eq!(tx_receipt.transaction_hash, H256::from_low_u64_be(0x5678));
+        assert_eq!(tx_receipt.status, TxStatus::Pending);
+    }
+
+    #[test]
+    fn transaction_receipt_can_be_converted_to_pending_transaction_no_status_and_block_info() {
+        let tx_receipt: TxReceipt = create_tx_receipt(
+            Some(U64::from(1)),
+            Some(H256::from_low_u64_be(0x1234)),
+            None,
+            H256::from_low_u64_be(0x5678),
+        );
+
+        assert_eq!(tx_receipt.transaction_hash, H256::from_low_u64_be(0x5678));
+        assert_eq!(tx_receipt.status, TxStatus::Pending);
+    }
+
+    fn create_tx_receipt(
+        status: Option<U64>,
+        block_hash: Option<H256>,
+        block_number: Option<U64>,
+        transaction_hash: H256,
+    ) -> TxReceipt {
+        let receipt = TransactionReceipt {
+            status,
+            root: None,
+            block_hash,
+            block_number,
+            cumulative_gas_used: Default::default(),
+            gas_used: None,
+            contract_address: None,
+            transaction_hash,
+            transaction_index: Default::default(),
+            logs: vec![],
+            logs_bloom: Default::default(),
+        };
+        receipt.into()
     }
 }

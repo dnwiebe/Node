@@ -85,6 +85,7 @@ mod tests {
 
     use masq_lib::logger::Logger;
     use masq_lib::test_utils::logging::{init_test_logging, TestLogHandler};
+    use masq_lib::test_utils::utils::TEST_DEFAULT_CHAIN;
     use web3::types::U256;
 
     fn blockchain_agent_null_constructor_works<C>(constructor: C)
@@ -177,5 +178,18 @@ mod tests {
 
         assert_eq!(result, &Wallet::null());
         assert_error_log(test_name, "consuming_wallet")
+    }
+
+    #[test]
+    fn null_agent_get_chain() {
+        init_test_logging();
+        let test_name = "null_agent_get_chain";
+        let mut subject = BlockchainAgentNull::new();
+        subject.logger = Logger::new(test_name);
+
+        let result = subject.get_chain();
+
+        assert_eq!(result, TEST_DEFAULT_CHAIN);
+        assert_error_log(test_name, "get_chain")
     }
 }

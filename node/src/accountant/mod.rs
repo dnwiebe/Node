@@ -1119,7 +1119,7 @@ mod tests {
     use std::sync::Mutex;
     use std::time::Duration;
     use std::vec;
-    use web3::types::TransactionReceipt;
+    use crate::blockchain::blockchain_interface::blockchain_interface_web3::lower_level_interface_web3::{TransactionBlock, TxReceipt, TxStatus};
 
     impl Handler<AssertionsMessage<Accountant>> for Accountant {
         type Result = ();
@@ -3446,16 +3446,16 @@ mod tests {
                 .unwrap();
         let _blockchain_client_server = MBCSBuilder::new(port)
             // Blockchain Agent Gas Price
-            .response("0x3B9ACA00".to_string(), 0) // 1000000000
+            .ok_response("0x3B9ACA00".to_string(), 0) // 1000000000
             // Blockchain Agent transaction fee balance
-            .response("0xFFF0".to_string(), 0) // 65520
+            .ok_response("0xFFF0".to_string(), 0) // 65520
             // Blockchain Agent masq balance
-            .response(
+            .ok_response(
                 "0x000000000000000000000000000000000000000000000000000000000000FFFF".to_string(),
                 0,
             )
             // Submit payments to blockchain
-            .response("0xFFF0".to_string(), 1)
+            .ok_response("0xFFF0".to_string(), 1)
             .begin_batch()
             .raw_response(
                 ReceiptResponseBuilder::default()
@@ -3510,6 +3510,8 @@ mod tests {
                 ReceiptResponseBuilder::default()
                     .transaction_hash(pending_tx_hash_2)
                     .status(U64::from(1))
+                    .block_number(U64::from(1234))
+                    .block_hash(Default::default())
                     .build(),
             )
             .end_batch()
@@ -3797,9 +3799,13 @@ mod tests {
             .build();
         let subject_addr = subject.start();
         let transaction_hash_1 = make_tx_hash(4545);
-        let mut transaction_receipt_1 = TransactionReceipt::default();
-        transaction_receipt_1.transaction_hash = transaction_hash_1;
-        transaction_receipt_1.status = Some(U64::from(1)); //success
+        let transaction_receipt_1 = TxReceipt {
+            transaction_hash: transaction_hash_1,
+            status: TxStatus::Succeeded(TransactionBlock {
+                block_hash: Default::default(),
+                block_number: U64::from(100),
+            }),
+        };
         let fingerprint_1 = PendingPayableFingerprint {
             rowid: 5,
             timestamp: from_time_t(200_000_000),
@@ -3809,9 +3815,13 @@ mod tests {
             process_error: None,
         };
         let transaction_hash_2 = make_tx_hash(3333333);
-        let mut transaction_receipt_2 = TransactionReceipt::default();
-        transaction_receipt_2.transaction_hash = transaction_hash_2;
-        transaction_receipt_2.status = Some(U64::from(1)); //success
+        let transaction_receipt_2 = TxReceipt {
+            transaction_hash: transaction_hash_2,
+            status: TxStatus::Succeeded(TransactionBlock {
+                block_hash: Default::default(),
+                block_number: U64::from(200),
+            }),
+        };
         let fingerprint_2 = PendingPayableFingerprint {
             rowid: 10,
             timestamp: from_time_t(199_780_000),
@@ -3823,11 +3833,11 @@ mod tests {
         let msg = ReportTransactionReceipts {
             fingerprints_with_receipts: vec![
                 (
-                    TransactionReceiptResult::Found(transaction_receipt_1.into()),
+                    TransactionReceiptResult::RpcResponse(transaction_receipt_1),
                     fingerprint_1.clone(),
                 ),
                 (
-                    TransactionReceiptResult::Found(transaction_receipt_2.into()),
+                    TransactionReceiptResult::RpcResponse(transaction_receipt_2),
                     fingerprint_2.clone(),
                 ),
             ],

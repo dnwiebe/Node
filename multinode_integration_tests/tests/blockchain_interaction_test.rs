@@ -32,8 +32,8 @@ fn debtors_are_credited_once_but_not_twice() {
     // Create and initialize mock blockchain client: prepare a receivable at block 2000
     eprintln!("Setting up mock blockchain client");
     let blockchain_client_server = MBCSBuilder::new(mbcs_port)
-        .response("0x5DC", 1) // eth_blockNumber 1500
-        .response(
+        .ok_response("0x5DC", 1) // eth_blockNumber 1500
+        .ok_response(
             vec![LogObject {
                 removed: false,
                 log_index: Some("0x20".to_string()),
