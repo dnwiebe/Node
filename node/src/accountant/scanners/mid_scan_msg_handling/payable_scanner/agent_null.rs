@@ -5,7 +5,9 @@ use crate::accountant::scanners::mid_scan_msg_handling::payable_scanner::blockch
 use crate::sub_lib::blockchain_bridge::ConsumingWalletBalances;
 use crate::sub_lib::wallet::Wallet;
 use ethereum_types::U256;
+use masq_lib::blockchains::chains::Chain;
 use masq_lib::logger::Logger;
+use masq_lib::test_utils::utils::TEST_DEFAULT_CHAIN;
 
 #[derive(Clone)]
 pub struct BlockchainAgentNull {
@@ -35,6 +37,11 @@ impl BlockchainAgent for BlockchainAgentNull {
     fn consuming_wallet(&self) -> &Wallet {
         self.log_function_call("consuming_wallet()");
         &self.wallet
+    }
+
+    fn get_chain(&self) -> Chain {
+        self.log_function_call("get_chain()");
+        TEST_DEFAULT_CHAIN
     }
 
     #[cfg(test)]
@@ -78,6 +85,7 @@ mod tests {
 
     use masq_lib::logger::Logger;
     use masq_lib::test_utils::logging::{init_test_logging, TestLogHandler};
+    use masq_lib::test_utils::utils::TEST_DEFAULT_CHAIN;
     use web3::types::U256;
 
     fn blockchain_agent_null_constructor_works<C>(constructor: C)
@@ -170,5 +178,18 @@ mod tests {
 
         assert_eq!(result, &Wallet::null());
         assert_error_log(test_name, "consuming_wallet")
+    }
+
+    #[test]
+    fn null_agent_get_chain() {
+        init_test_logging();
+        let test_name = "null_agent_get_chain";
+        let mut subject = BlockchainAgentNull::new();
+        subject.logger = Logger::new(test_name);
+
+        let result = subject.get_chain();
+
+        assert_eq!(result, TEST_DEFAULT_CHAIN);
+        assert_error_log(test_name, "get_chain")
     }
 }

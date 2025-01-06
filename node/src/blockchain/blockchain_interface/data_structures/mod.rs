@@ -26,7 +26,6 @@ impl fmt::Display for BlockchainTransaction {
     }
 }
 
-// TODO: GH-744: Review RetrievedBlockchainTransactions & PaymentsAndStartBlock and keep only one. check master to see whats been used.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RetrievedBlockchainTransactions {
     pub new_start_block: u64,

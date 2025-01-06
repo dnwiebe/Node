@@ -12,7 +12,6 @@ pub trait LowBlockchainInt {
     // TODO: GH-495 The data structures in this trait are not generic, will need associated_type_defaults to implement it.
     // see issue #29661 <https://github.com/rust-lang/rust/issues/29661> for more information
 
-    // TODO: Address can be a wrapper type
     fn get_transaction_fee_balance(
         &self,
         address: Address,

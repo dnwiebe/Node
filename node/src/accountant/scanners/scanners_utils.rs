@@ -400,6 +400,27 @@ pub mod pending_payable_scanner_utils {
         scan_report.failures.push(fingerprint.into());
         scan_report
     }
+
+    pub fn handle_none_receipt(
+        mut scan_report: PendingPayableScanReport,
+        payable: PendingPayableFingerprint,
+        error_msg: &str,
+        logger: &Logger,
+    ) -> PendingPayableScanReport {
+        debug!(
+            logger,
+            "Interpreting a receipt for transaction {:?} but {}; attempt {}, {}ms since sending",
+            payable.hash,
+            error_msg,
+            payable.attempt,
+            elapsed_in_ms(payable.timestamp)
+        );
+
+        scan_report
+            .still_pending
+            .push(PendingPayableId::new(payable.rowid, payable.hash));
+        scan_report
+    }
 }
 
 pub mod receivable_scanner_utils {

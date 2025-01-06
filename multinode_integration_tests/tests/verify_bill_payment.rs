@@ -233,7 +233,7 @@ fn verify_bill_payment() {
     assert_balances(
         &contract_owner_wallet,
         &blockchain_interface,
-        "99995074522000000000",
+        "99995231980000000000",
         "471999999700000000000000000",
     );
 

@@ -3,6 +3,7 @@
 use crate::accountant::scanners::mid_scan_msg_handling::payable_scanner::blockchain_agent::BlockchainAgent;
 use crate::sub_lib::blockchain_bridge::ConsumingWalletBalances;
 use crate::sub_lib::wallet::Wallet;
+use masq_lib::blockchains::chains::Chain;
 
 #[derive(Debug, Clone)]
 pub struct BlockchainAgentWeb3 {
@@ -11,6 +12,7 @@ pub struct BlockchainAgentWeb3 {
     maximum_added_gas_margin: u128,
     consuming_wallet: Wallet,
     consuming_wallet_balances: ConsumingWalletBalances,
+    chain: Chain,
 }
 
 impl BlockchainAgent for BlockchainAgentWeb3 {
@@ -31,6 +33,10 @@ impl BlockchainAgent for BlockchainAgentWeb3 {
     fn consuming_wallet(&self) -> &Wallet {
         &self.consuming_wallet
     }
+
+    fn get_chain(&self) -> Chain {
+        self.chain
+    }
 }
 
 // 64 * (64 - 12) ... std transaction has data of 64 bytes and 12 bytes are never used with us;
@@ -43,6 +49,7 @@ impl BlockchainAgentWeb3 {
         gas_limit_const_part: u128,
         consuming_wallet: Wallet,
         consuming_wallet_balances: ConsumingWalletBalances,
+        chain: Chain,
     ) -> Self {
         Self {
             gas_price_wei,
@@ -50,6 +57,7 @@ impl BlockchainAgentWeb3 {
             consuming_wallet,
             maximum_added_gas_margin: WEB3_MAXIMAL_GAS_LIMIT_MARGIN,
             consuming_wallet_balances,
+            chain,
         }
     }
 }
@@ -60,10 +68,9 @@ mod tests {
         BlockchainAgentWeb3, WEB3_MAXIMAL_GAS_LIMIT_MARGIN,
     };
     use crate::accountant::scanners::mid_scan_msg_handling::payable_scanner::blockchain_agent::BlockchainAgent;
-
     use crate::sub_lib::blockchain_bridge::ConsumingWalletBalances;
     use crate::test_utils::make_wallet;
-
+    use masq_lib::test_utils::utils::TEST_DEFAULT_CHAIN;
     use web3::types::U256;
 
     #[test]
@@ -86,6 +93,7 @@ mod tests {
             gas_limit_const_part,
             consuming_wallet.clone(),
             consuming_wallet_balances,
+            TEST_DEFAULT_CHAIN,
         );
 
         assert_eq!(subject.agreed_fee_per_computation_unit(), gas_price_gwei);
@@ -94,6 +102,7 @@ mod tests {
             subject.consuming_wallet_balances(),
             consuming_wallet_balances
         );
+        assert_eq!(subject.get_chain(), TEST_DEFAULT_CHAIN);
     }
 
     #[test]
@@ -103,8 +112,13 @@ mod tests {
             transaction_fee_balance_in_minor_units: Default::default(),
             masq_token_balance_in_minor_units: Default::default(),
         };
-        let agent =
-            BlockchainAgentWeb3::new(444, 77_777, consuming_wallet, consuming_wallet_balances);
+        let agent = BlockchainAgentWeb3::new(
+            444,
+            77_777,
+            consuming_wallet,
+            consuming_wallet_balances,
+            TEST_DEFAULT_CHAIN,
+        );
 
         let result = agent.estimated_transaction_fee_total(3);
 

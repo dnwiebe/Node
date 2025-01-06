@@ -1069,7 +1069,7 @@ impl IBCDHelper for IBCDHelperReal {
         let payload = match proxy.make_payload(msg, &stream_key) {
             Ok(payload) => {
                 if let Some(hostname) = &payload.target_hostname {
-                    if let Err(e) = Hostname::new(hostname).is_valid() {
+                    if let Err(e) = Hostname::new(hostname).validate_hostname() {
                         return Err(format!("Request to wildcard IP detected - {} (Most likely because Blockchain Service URL is not set)", e));
                     }
                 }
@@ -1236,7 +1236,7 @@ impl Hostname {
         Self { hostname }
     }
 
-    fn is_valid(&self) -> Result<(), String> {
+    fn validate_hostname(&self) -> Result<(), String> {
         match IpAddr::from_str(&self.hostname) {
             Ok(ip_addr) => match ip_addr {
                 IpAddr::V4(ipv4addr) => Self::validate_ipv4(ipv4addr),
@@ -2586,11 +2586,6 @@ mod tests {
         let test_name = "proxy_server_sends_a_message_with_error_when_quad_zeros_are_detected";
         let cryptde = main_cryptde();
         let http_request = b"GET /index.html HTTP/1.1\r\nHost: 0.0.0.0\r\n\r\n";
-        let (proxy_server_mock, _, _) = make_recorder();
-        let route_query_response = None;
-        let (neighborhood_mock, _, _) = make_recorder();
-        let neighborhood_mock =
-            neighborhood_mock.route_query_response(route_query_response.clone());
         let socket_addr = SocketAddr::from_str("1.2.3.4:5678").unwrap();
         let stream_key = StreamKey::make_meaningless_stream_key();
         let expected_data = http_request.to_vec();
@@ -2615,13 +2610,7 @@ mod tests {
         subject.stream_key_factory = Box::new(stream_key_factory);
         subject.logger = Logger::new(test_name);
         let subject_addr: Addr<ProxyServer> = subject.start();
-        let mut peer_actors = peer_actors_builder()
-            .proxy_server(proxy_server_mock)
-            .neighborhood(neighborhood_mock)
-            .build();
-        // Get the dns_retry_result recipient so we can partially mock it...
-        let dns_retry_result_recipient = peer_actors.proxy_server.route_result_sub;
-        peer_actors.proxy_server.route_result_sub = dns_retry_result_recipient; //Partial mocking
+        let peer_actors = peer_actors_builder().build();
         subject_addr.try_send(BindMessage { peer_actors }).unwrap();
 
         subject_addr.try_send(msg_from_dispatcher).unwrap();
@@ -6020,34 +6009,37 @@ mod tests {
     fn hostname_is_valid_works() {
         // IPv4
         assert_eq!(
-            Hostname::new("0.0.0.0").is_valid(),
+            Hostname::new("0.0.0.0").validate_hostname(),
             Err("0.0.0.0".to_string())
         );
         assert_eq!(
-            Hostname::new("127.0.0.1").is_valid(),
+            Hostname::new("127.0.0.1").validate_hostname(),
             Err("127.0.0.1".to_string())
         );
-        assert_eq!(Hostname::new("192.168.1.158").is_valid(), Ok(()));
+        assert_eq!(Hostname::new("192.168.1.158").validate_hostname(), Ok(()));
         // IPv6
         assert_eq!(
-            Hostname::new("0:0:0:0:0:0:0:0").is_valid(),
+            Hostname::new("0:0:0:0:0:0:0:0").validate_hostname(),
             Err("::".to_string())
         );
         assert_eq!(
-            Hostname::new("0:0:0:0:0:0:0:1").is_valid(),
+            Hostname::new("0:0:0:0:0:0:0:1").validate_hostname(),
             Err("::1".to_string())
         );
         assert_eq!(
-            Hostname::new("2001:0db8:85a3:0000:0000:8a2e:0370:7334").is_valid(),
+            Hostname::new("2001:0db8:85a3:0000:0000:8a2e:0370:7334").validate_hostname(),
             Ok(())
         );
         // Hostname
         assert_eq!(
-            Hostname::new("localhost").is_valid(),
+            Hostname::new("localhost").validate_hostname(),
             Err("localhost".to_string())
         );
-        assert_eq!(Hostname::new("example.com").is_valid(), Ok(()));
-        assert_eq!(Hostname::new("https://example.com").is_valid(), Ok(()));
+        assert_eq!(Hostname::new("example.com").validate_hostname(), Ok(()));
+        assert_eq!(
+            Hostname::new("https://example.com").validate_hostname(),
+            Ok(())
+        );
     }
 
     #[test]

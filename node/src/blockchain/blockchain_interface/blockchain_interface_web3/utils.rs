@@ -1,8 +1,5 @@
 // Copyright (c) 2024, MASQ (https://masq.ai) and/or its affiliates. All rights reserved.
 
-// TODO: GH-744: At the end of the review rename this file to: web3_blockchain_interface_utils.rs
-//       Or we should move this file into blockchain_interface_web3
-
 use crate::accountant::db_access_objects::payable_dao::PayableAccount;
 use crate::accountant::db_access_objects::pending_payable_dao::PendingPayable;
 use crate::accountant::scanners::mid_scan_msg_handling::payable_scanner::agent_web3::BlockchainAgentWeb3;
@@ -311,10 +308,11 @@ pub fn send_payables_within_batch(
     )
 }
 
-pub fn dynamically_create_blockchain_agent_web3(
+pub fn create_blockchain_agent_web3(
     gas_limit_const_part: u128,
     blockchain_agent_future_result: BlockchainAgentFutureResult,
     wallet: Wallet,
+    chain: Chain,
 ) -> Box<dyn BlockchainAgent> {
     Box::new(BlockchainAgentWeb3::new(
         blockchain_agent_future_result.gas_price_wei.as_u128(),
@@ -325,6 +323,7 @@ pub fn dynamically_create_blockchain_agent_web3(
                 .transaction_fee_balance,
             masq_token_balance_in_minor_units: blockchain_agent_future_result.masq_token_balance,
         },
+        chain,
     ))
 }
 
@@ -375,7 +374,7 @@ mod tests {
         let port = find_free_port();
         let _blockchain_client_server = MBCSBuilder::new(port)
             .begin_batch()
-            .response(
+            .ok_response(
                 "0x94881436a9c89f48b01651ff491c69e97089daf71ab8cfb240243d7ecf9b38b2".to_string(),
                 7,
             )
@@ -388,7 +387,7 @@ mod tests {
         .unwrap();
         let pending_nonce = 1;
         let chain = DEFAULT_CHAIN;
-        let gas_price = DEFAULT_GAS_PRICE;
+        let gas_price_in_gwei = DEFAULT_GAS_PRICE;
         let consuming_wallet = make_paying_wallet(b"paying_wallet");
         let account = make_payable_account(1);
         let web3_batch = Web3::new(Batch::new(transport));
@@ -399,7 +398,7 @@ mod tests {
             &account,
             consuming_wallet,
             pending_nonce.into(),
-            (gas_price * 1_000_000_000) as u128,
+            gwei_to_wei(gas_price_in_gwei),
         );
 
         let mut batch_result = web3_batch.eth().transport().submit_batch().wait().unwrap();
@@ -432,7 +431,7 @@ mod tests {
         .unwrap();
         let web3_batch = Web3::new(Batch::new(transport));
         let chain = DEFAULT_CHAIN;
-        let gas_price = DEFAULT_GAS_PRICE;
+        let gas_price_in_gwei = DEFAULT_GAS_PRICE;
         let pending_nonce = 1;
         let consuming_wallet = make_paying_wallet(b"paying_wallet");
         let account_1 = make_payable_account(1);
@@ -444,7 +443,7 @@ mod tests {
             chain,
             &web3_batch,
             consuming_wallet,
-            (gas_price * 1_000_000_000) as u128,
+            gwei_to_wei(gas_price_in_gwei),
             pending_nonce.into(),
             &accounts,
         );
@@ -637,6 +636,14 @@ mod tests {
     #[test]
     fn send_payables_within_batch_works() {
         let accounts = vec![make_payable_account(1), make_payable_account(2)];
+        let port = find_free_port();
+        let _blockchain_client_server = MBCSBuilder::new(port)
+            .begin_batch()
+            // TODO: GH-547: This rpc_result should be validated in production code.
+            .ok_response("irrelevant_ok_rpc_response".to_string(), 7)
+            .ok_response("irrelevant_ok_rpc_response_2".to_string(), 8)
+            .end_batch()
+            .start();
         let expected_result = Ok(vec![
             Correct(PendingPayable {
                 recipient_wallet: accounts[0].wallet.clone(),
@@ -654,13 +661,6 @@ mod tests {
             }),
         ]);
 
-        let port = find_free_port();
-        let _blockchain_client_server = MBCSBuilder::new(port)
-            .begin_batch()
-            .response("rpc_result".to_string(), 7)
-            .response("rpc_result_2".to_string(), 8)
-            .end_batch()
-            .start();
         execute_send_payables_test(
             "send_payables_within_batch_works",
             accounts,
@@ -674,6 +674,7 @@ mod tests {
         let accounts = vec![make_payable_account(1), make_payable_account(2)];
         let os_code = transport_error_code();
         let os_msg = transport_error_message();
+        let port = find_free_port();
         let expected_result = Err(Sending {
             msg: format!("Transport error: Error(Connect, Os {{ code: {}, kind: ConnectionRefused, message: {:?} }})", os_code, os_msg).to_string(),
             hashes: vec![
@@ -682,7 +683,6 @@ mod tests {
             ],
         });
 
-        let port = find_free_port();
         execute_send_payables_test(
             "send_payables_within_batch_fails_on_submit_batch_call",
             accounts,
@@ -694,27 +694,6 @@ mod tests {
     #[test]
     fn send_payables_within_batch_all_payments_fail() {
         let accounts = vec![make_payable_account(1), make_payable_account(2)];
-        let expected_result = Ok(vec![
-            Failed(RpcPayableFailure {
-                rpc_error: Rpc(Error {
-                    code: ServerError(429),
-                    message: "The requests per second (RPS) of your requests are higher than your plan allows.".to_string(),
-                    data: None,
-                }),
-                recipient_wallet: accounts[0].wallet.clone(),
-                hash: H256::from_str("35f42b260f090a559e8b456718d9c91a9da0f234ed0a129b9d5c4813b6615af4").unwrap(),
-            }),
-            Failed(RpcPayableFailure {
-                rpc_error: Rpc(Error {
-                    code: ServerError(429),
-                    message: "The requests per second (RPS) of your requests are higher than your plan allows.".to_string(),
-                    data: None,
-                }),
-                recipient_wallet: accounts[1].wallet.clone(),
-                hash: H256::from_str("7f3221109e4f1de8ba1f7cd358aab340ecca872a1456cb1b4f59ca33d3e22ee3").unwrap(),
-            }),
-        ]);
-
         let port = find_free_port();
         let _blockchain_client_server = MBCSBuilder::new(port)
             .begin_batch()
@@ -732,6 +711,27 @@ mod tests {
             )
             .end_batch()
             .start();
+        let expected_result = Ok(vec![
+            Failed(RpcPayableFailure {
+                rpc_error: Rpc(Error {
+                    code: ServerError(429),
+                    message: "The requests per second (RPS) of your requests are higher than your plan allows.".to_string(),
+                    data: None,
+                }),
+                recipient_wallet: accounts[0].wallet.clone(),
+                hash: H256::from_str("35f42b260f090a559e8b456718d9c91a9da0f234ed0a129b9d5c4813b6615af4").unwrap(),
+            }),
+            Failed(RpcPayableFailure {
+                rpc_error: Rpc(Error {
+                    code: ServerError(429),
+                    message: "The requests per second (RPS) of your requests are higher than your plan allows.".to_string(),
+                    data: None,
+                }),
+                recipient_wallet: accounts[1].wallet.clone(),
+                hash: H256::from_str("7f3221109e4f1de8ba1f7cd358aab340ecca872a1456cb1b4f59ca33d3e22ee3").unwrap(),
+            }),
+        ]);
+
         execute_send_payables_test(
             "send_payables_within_batch_all_payments_fail",
             accounts,
@@ -743,6 +743,18 @@ mod tests {
     #[test]
     fn send_payables_within_batch_one_payment_works_the_other_fails() {
         let accounts = vec![make_payable_account(1), make_payable_account(2)];
+        let port = find_free_port();
+        let _blockchain_client_server = MBCSBuilder::new(port)
+            .begin_batch()
+            .ok_response("rpc_result".to_string(), 7)
+            .err_response(
+                429,
+                "The requests per second (RPS) of your requests are higher than your plan allows."
+                    .to_string(),
+                7,
+            )
+            .end_batch()
+            .start();
         let expected_result = Ok(vec![
             Correct(PendingPayable {
                 recipient_wallet: accounts[0].wallet.clone(),
@@ -759,18 +771,6 @@ mod tests {
             }),
         ]);
 
-        let port = find_free_port();
-        let _blockchain_client_server = MBCSBuilder::new(port)
-            .begin_batch()
-            .response("rpc_result".to_string(), 7)
-            .err_response(
-                429,
-                "The requests per second (RPS) of your requests are higher than your plan allows."
-                    .to_string(),
-                7,
-            )
-            .end_batch()
-            .start();
         execute_send_payables_test(
             "send_payables_within_batch_one_payment_works_the_other_fails",
             accounts,
@@ -826,7 +826,7 @@ mod tests {
         let web3 = Web3::new(transport.clone());
         let chain = DEFAULT_CHAIN;
         let amount = 11_222_333_444;
-        let gas_price_in_wei = 123_000_000_000_000_000_000;
+        let gas_price_in_wei = 123 * 10_u128.pow(18);
         let nonce = U256::from(5);
         let recipient_wallet = make_wallet("recipient_wallet");
         let consuming_wallet = make_paying_wallet(b"consuming_wallet");
@@ -1012,7 +1012,7 @@ mod tests {
             Wallet::from(address)
         };
         let nonce_correct_type = U256::from(nonce);
-        let gas_price = match chain {
+        let gas_price_in_gwei = match chain {
             Chain::EthMainnet => TEST_GAS_PRICE_ETH,
             Chain::EthRopsten => TEST_GAS_PRICE_ETH,
             Chain::PolyMainnet => TEST_GAS_PRICE_POLYGON,
@@ -1032,7 +1032,7 @@ mod tests {
             consuming_wallet,
             payable_account.balance_wei,
             nonce_correct_type,
-            (gas_price * 1_000_000_000) as u128,
+            gwei_to_wei(gas_price_in_gwei),
         );
 
         let byte_set_to_compare = signed_transaction.raw_transaction.0;

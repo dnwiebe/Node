@@ -13,7 +13,7 @@ use crate::blockchain::blockchain_interface::lower_level_interface::LowBlockchai
 use crate::sub_lib::wallet::Wallet;
 use futures::Future;
 use masq_lib::blockchains::chains::Chain;
-use web3::types::{Address, BlockNumber};
+use web3::types::Address;
 use masq_lib::logger::Logger;
 use crate::accountant::db_access_objects::payable_dao::PayableAccount;
 use crate::blockchain::blockchain_bridge::PendingPayableFingerprintSeeds;
@@ -24,14 +24,11 @@ pub trait BlockchainInterface {
 
     fn get_chain(&self) -> Chain;
 
-    // Initially this lower_interface wasn't wrapped with a box, but under the card GH-744 this design was used to solve lifetime issues
-    // with the futures.
-    // The downside to this method is we cant store persistent values, instead its being initialised where ever it being used.
     fn lower_interface(&self) -> Box<dyn LowBlockchainInt>;
 
     fn retrieve_transactions(
         &self,
-        start_block: BlockNumber,
+        start_block: u64,
         fallback_start_block_number: u64,
         recipient: Address,
     ) -> Box<dyn Future<Item = RetrievedBlockchainTransactions, Error = BlockchainError>>;
@@ -49,7 +46,6 @@ pub trait BlockchainInterface {
     fn submit_payables_in_batch(
         &self,
         logger: Logger,
-        chain: Chain,
         agent: Box<dyn BlockchainAgent>,
         fingerprints_recipient: Recipient<PendingPayableFingerprintSeeds>,
         affordable_accounts: Vec<PayableAccount>,
