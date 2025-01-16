@@ -46,21 +46,48 @@ mod tests {
     use crate::blockchain::blockchain_interface_initializer::BlockchainInterfaceInitializer;
     use masq_lib::blockchains::chains::Chain;
 
+    use futures::Future;
     use std::net::Ipv4Addr;
+    use web3::transports::Http;
 
-    use crate::blockchain::blockchain_interface::test_utils::test_blockchain_interface_is_connected_and_functioning;
-
+    use crate::blockchain::blockchain_interface::blockchain_interface_web3::{
+        BlockchainInterfaceWeb3, REQUESTS_IN_PARALLEL,
+    };
+    use crate::blockchain::blockchain_interface::BlockchainInterface;
+    use crate::test_utils::make_wallet;
     use masq_lib::constants::DEFAULT_CHAIN;
+    use masq_lib::test_utils::mock_blockchain_client_server::MBCSBuilder;
+    use masq_lib::utils::find_free_port;
 
     #[test]
     fn initialize_web3_interface_works() {
-        let subject_factory = |port: u16, chain: Chain| {
-            let subject = BlockchainInterfaceInitializer {};
-            let server_url = &format!("http://{}:{}", &Ipv4Addr::LOCALHOST.to_string(), port);
-            subject.initialize_web3_interface(server_url, chain)
-        };
+        let port = find_free_port();
+        let _blockchain_client_server = MBCSBuilder::new(port)
+            .ok_response("0x3B9ACA00".to_string(), 0) // gas_price = 10000000000
+            .ok_response("0xFF40".to_string(), 0)
+            .ok_response(
+                "0x000000000000000000000000000000000000000000000000000000000000FFFF".to_string(),
+                0,
+            )
+            .ok_response("0x23".to_string(), 1)
+            .start();
+        let wallet = make_wallet("123");
+        let chain = Chain::PolyMainnet;
+        let server_url = &format!("http://{}:{}", &Ipv4Addr::LOCALHOST, port);
+        let (event_loop_handle, transport) =
+            Http::with_max_parallel(server_url, REQUESTS_IN_PARALLEL).unwrap();
+        let subject = BlockchainInterfaceWeb3::new(transport, event_loop_handle, chain);
 
-        test_blockchain_interface_is_connected_and_functioning(subject_factory)
+        let blockchain_agent = subject
+            .build_blockchain_agent(wallet.clone())
+            .wait()
+            .unwrap();
+
+        assert_eq!(blockchain_agent.consuming_wallet(), &wallet);
+        assert_eq!(
+            blockchain_agent.agreed_fee_per_computation_unit(),
+            1_000_000_000
+        );
     }
 
     #[test]

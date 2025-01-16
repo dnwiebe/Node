@@ -839,7 +839,7 @@ impl Neighborhood {
                     Err(PersistentConfigError::DatabaseError(msg))
                         if &msg == "database is locked" =>
                     {
-                        warning! (
+                        warning!(
                         self.logger,
                         "Could not persist immediate-neighbor changes: database locked - skipping"
                     )
@@ -2590,9 +2590,9 @@ mod tests {
         system.run(); // If this never halts, it's because the Neighborhood isn't properly killing its actor
 
         let tlh = TestLogHandler::new();
-        tlh.exists_log_containing ("WARN: Neighborhood: Node at 3.4.5.6 refused Debut: No neighbors for Introduction or Pass");
-        tlh.exists_log_containing ("WARN: Neighborhood: Node at 4.5.6.7 refused Debut: Node owner manually rejected your Debut");
-        tlh.exists_log_containing ("ERROR: Neighborhood: None of the Nodes listed in the --neighbors parameter could accept your Debut; shutting down");
+        tlh.exists_log_containing("WARN: Neighborhood: Node at 3.4.5.6 refused Debut: No neighbors for Introduction or Pass");
+        tlh.exists_log_containing("WARN: Neighborhood: Node at 4.5.6.7 refused Debut: Node owner manually rejected your Debut");
+        tlh.exists_log_containing("ERROR: Neighborhood: None of the Nodes listed in the --neighbors parameter could accept your Debut; shutting down");
     }
 
     #[test]
@@ -3387,7 +3387,7 @@ mod tests {
         assert_eq!(
             new_undesirability,
             1_000_000 // existing undesirability
-                + rate_pack.routing_charge (1_000) as i64 // charge to route packet
+                + rate_pack.routing_charge(1_000) as i64 // charge to route packet
         );
     }
 
@@ -3410,7 +3410,7 @@ mod tests {
         assert_eq!(
             new_undesirability,
             1_000_000 // existing undesirability
-                    + rate_pack.exit_charge (1_000) as i64 // charge to exit request
+                + rate_pack.exit_charge(1_000) as i64 // charge to exit request
         );
     }
 
@@ -3438,8 +3438,8 @@ mod tests {
         assert_eq!(
             new_undesirability,
             1_000_000 // existing undesirability
-                    + rate_pack.exit_charge (1_000) as i64 // charge to exit request
-                    + UNREACHABLE_HOST_PENALTY // because host is blacklisted
+                + rate_pack.exit_charge(1_000) as i64 // charge to exit request
+                + UNREACHABLE_HOST_PENALTY // because host is blacklisted
         );
         TestLogHandler::new().exists_log_containing(
             "TRACE: Neighborhood: Node with PubKey 0x02030405 \
@@ -3487,8 +3487,8 @@ mod tests {
         let rate_pack = node_record.rate_pack();
         assert_eq!(
             initial_undesirability,
-            rate_pack.exit_charge (1_000) as i64 // charge to exit response
-                + rate_pack.routing_charge (1_000) as i64 // charge to route response
+            rate_pack.exit_charge(1_000) as i64 // charge to exit response
+                + rate_pack.routing_charge(1_000) as i64 // charge to route response
         );
     }
 
@@ -3511,7 +3511,7 @@ mod tests {
         assert_eq!(
             new_undesirability,
             1_000_000 // existing undesirability
-                + rate_pack.routing_charge (1_000) as i64 // charge to route response
+                + rate_pack.routing_charge(1_000) as i64 // charge to route response
         );
     }
 
@@ -5033,7 +5033,7 @@ mod tests {
                     },
                     earning_wallet.clone(),
                     consuming_wallet.clone(),
-                    "neighborhood_sends_node_query_response_with_none_when_key_query_matches_no_configured_data"
+                    "neighborhood_sends_node_query_response_with_none_when_key_query_matches_no_configured_data",
                 ),
             );
             let addr: Addr<Neighborhood> = subject.start();
@@ -5095,7 +5095,7 @@ mod tests {
                     },
                     earning_wallet.clone(),
                     consuming_wallet.clone(),
-                    "neighborhood_sends_node_query_response_with_result_when_key_query_matches_configured_data"
+                    "neighborhood_sends_node_query_response_with_result_when_key_query_matches_configured_data",
                 ),
             );
             subject
@@ -5162,7 +5162,7 @@ mod tests {
                     },
                     earning_wallet.clone(),
                     consuming_wallet.clone(),
-                    "neighborhood_sends_node_query_response_with_none_when_ip_address_query_matches_no_configured_data"
+                    "neighborhood_sends_node_query_response_with_none_when_ip_address_query_matches_no_configured_data",
                 ),
             );
             let addr: Addr<Neighborhood> = subject.start();
@@ -5226,7 +5226,7 @@ mod tests {
                 },
                 node_record.earning_wallet(),
                 None,
-                "neighborhood_sends_node_query_response_with_result_when_ip_address_query_matches_configured_data"
+                "neighborhood_sends_node_query_response_with_result_when_ip_address_query_matches_configured_data",
             );
             let mut subject = Neighborhood::new(cryptde, &config);
             subject

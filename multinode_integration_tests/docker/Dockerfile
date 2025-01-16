@@ -2,7 +2,8 @@
 #FROM debian:stable-slim
 #FROM debian:buster-slim
 #FROM debian:bullseye-slim
-FROM debian:bookworm-slim
+#FROM debian:bookworm-slim
+FROM debian:trixie-slim
 
 RUN apt-get update && \
     apt-get install -y libc6 && \

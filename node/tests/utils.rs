@@ -485,6 +485,10 @@ impl MASQNode {
                 "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC",
             )
             .pair("--log-level", "trace")
+            .pair(
+                "--blockchain-service-url",
+                "https://nonexistentblockchainservice.com",
+            )
             .args
     }
 

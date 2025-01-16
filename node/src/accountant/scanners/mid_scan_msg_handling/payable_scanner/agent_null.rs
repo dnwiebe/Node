@@ -5,7 +5,9 @@ use crate::accountant::scanners::mid_scan_msg_handling::payable_scanner::blockch
 use crate::sub_lib::blockchain_bridge::ConsumingWalletBalances;
 use crate::sub_lib::wallet::Wallet;
 use ethereum_types::U256;
+use masq_lib::blockchains::chains::Chain;
 use masq_lib::logger::Logger;
+use masq_lib::test_utils::utils::TEST_DEFAULT_CHAIN;
 
 #[derive(Clone)]
 pub struct BlockchainAgentNull {
@@ -27,7 +29,7 @@ impl BlockchainAgent for BlockchainAgentNull {
         }
     }
 
-    fn agreed_fee_per_computation_unit(&self) -> u64 {
+    fn agreed_fee_per_computation_unit(&self) -> u128 {
         self.log_function_call("agreed_fee_per_computation_unit()");
         0
     }
@@ -37,9 +39,9 @@ impl BlockchainAgent for BlockchainAgentNull {
         &self.wallet
     }
 
-    fn pending_transaction_id(&self) -> U256 {
-        self.log_function_call("pending_transaction_id()");
-        U256::zero()
+    fn get_chain(&self) -> Chain {
+        self.log_function_call("get_chain()");
+        TEST_DEFAULT_CHAIN
     }
 
     #[cfg(test)]
@@ -83,6 +85,7 @@ mod tests {
 
     use masq_lib::logger::Logger;
     use masq_lib::test_utils::logging::{init_test_logging, TestLogHandler};
+    use masq_lib::test_utils::utils::TEST_DEFAULT_CHAIN;
     use web3::types::U256;
 
     fn blockchain_agent_null_constructor_works<C>(constructor: C)
@@ -178,15 +181,15 @@ mod tests {
     }
 
     #[test]
-    fn null_agent_pending_transaction_id() {
+    fn null_agent_get_chain() {
         init_test_logging();
-        let test_name = "null_agent_pending_transaction_id";
+        let test_name = "null_agent_get_chain";
         let mut subject = BlockchainAgentNull::new();
         subject.logger = Logger::new(test_name);
 
-        let result = subject.pending_transaction_id();
+        let result = subject.get_chain();
 
-        assert_eq!(result, U256::zero());
-        assert_error_log(test_name, "pending_transaction_id");
+        assert_eq!(result, TEST_DEFAULT_CHAIN);
+        assert_error_log(test_name, "get_chain")
     }
 }

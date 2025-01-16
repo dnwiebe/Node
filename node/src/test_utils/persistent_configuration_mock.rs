@@ -678,6 +678,8 @@ impl PersistentConfigurationMock {
 
     set_arbitrary_id_stamp_in_mock_impl!();
 
+    // result_from allows a tester to push only a single value that can then be called multiple times.
+    // as opposed to pushing the same value for every call.
     fn result_from<T: Clone>(results: &RefCell<Vec<T>>) -> T {
         let mut borrowed = results.borrow_mut();
         if borrowed.is_empty() {

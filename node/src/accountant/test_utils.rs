@@ -29,6 +29,7 @@ use crate::accountant::{
     gwei_to_wei, Accountant, ResponseSkeleton, SentPayables, DEFAULT_PENDING_TOO_LONG_SEC,
 };
 use crate::blockchain::blockchain_bridge::PendingPayableFingerprint;
+use crate::blockchain::blockchain_interface::blockchain_interface_web3::HashAndAmount;
 use crate::blockchain::blockchain_interface::data_structures::BlockchainTransaction;
 use crate::blockchain::test_utils::make_tx_hash;
 use crate::bootstrapper::BootstrapperConfig;
@@ -891,7 +892,7 @@ pub struct PendingPayableDaoMock {
     fingerprints_rowids_results: RefCell<Vec<TransactionHashes>>,
     delete_fingerprints_params: Arc<Mutex<Vec<Vec<u64>>>>,
     delete_fingerprints_results: RefCell<Vec<Result<(), PendingPayableDaoError>>>,
-    insert_new_fingerprints_params: Arc<Mutex<Vec<(Vec<(H256, u128)>, SystemTime)>>>,
+    insert_new_fingerprints_params: Arc<Mutex<Vec<(Vec<HashAndAmount>, SystemTime)>>>,
     insert_new_fingerprints_results: RefCell<Vec<Result<(), PendingPayableDaoError>>>,
     increment_scan_attempts_params: Arc<Mutex<Vec<Vec<u64>>>>,
     increment_scan_attempts_result: RefCell<Vec<Result<(), PendingPayableDaoError>>>,
@@ -932,7 +933,7 @@ impl PendingPayableDao for PendingPayableDaoMock {
 
     fn insert_new_fingerprints(
         &self,
-        hashes_and_amounts: &[(H256, u128)],
+        hashes_and_amounts: &[HashAndAmount],
         batch_wide_timestamp: SystemTime,
     ) -> Result<(), PendingPayableDaoError> {
         self.insert_new_fingerprints_params
@@ -981,7 +982,7 @@ impl PendingPayableDaoMock {
 
     pub fn insert_fingerprints_params(
         mut self,
-        params: &Arc<Mutex<Vec<(Vec<(H256, u128)>, SystemTime)>>>,
+        params: &Arc<Mutex<Vec<(Vec<HashAndAmount>, SystemTime)>>>,
     ) -> Self {
         self.insert_new_fingerprints_params = params.clone();
         self

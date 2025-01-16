@@ -42,7 +42,7 @@ fn provided_and_consumed_services_are_recorded_in_databases() {
     let payables = non_pending_payables(&originating_node);
 
     // Waiting until the serving nodes have finished accruing their receivables
-    thread::sleep(Duration::from_secs(7));
+    thread::sleep(Duration::from_secs(10));
 
     // get all receivables from all other nodes
     let receivable_balances = non_originating_nodes

@@ -1,13 +1,11 @@
 // Copyright (c) 2019, MASQ (https://masq.ai) and/or its affiliates. All rights reserved.
 
 use crate::accountant::comma_joined_stringifiable;
-use crate::db_config::persistent_configuration::PersistentConfigError;
-use crate::sub_lib::wallet::Wallet;
 use itertools::Either;
 use std::fmt;
 use std::fmt::{Display, Formatter};
 use variant_count::VariantCount;
-use web3::types::{TransactionReceipt, H256};
+use web3::types::{Address, H256};
 
 const BLOCKCHAIN_SERVICE_URL_NOT_SPECIFIED: &str = "Uninitialized blockchain interface. To avoid \
 being delinquency-banned, you should restart the Node with a value for blockchain-service-url";
@@ -36,13 +34,10 @@ impl Display for BlockchainError {
     }
 }
 
-pub type BlockchainResult<T> = Result<T, BlockchainError>;
-pub type ResultForReceipt = BlockchainResult<Option<TransactionReceipt>>;
-
 #[derive(Clone, Debug, PartialEq, Eq, VariantCount)]
 pub enum PayableTransactionError {
     MissingConsumingWallet,
-    GasPriceQueryFailed(String),
+    GasPriceQueryFailed(BlockchainError),
     TransactionID(BlockchainError),
     UnusableWallet(String),
     Signing(String),
@@ -83,31 +78,25 @@ impl Display for PayableTransactionError {
 
 #[derive(Clone, Debug, PartialEq, Eq, VariantCount)]
 pub enum BlockchainAgentBuildError {
-    GasPrice(PersistentConfigError),
-    TransactionFeeBalance(Wallet, BlockchainError),
-    ServiceFeeBalance(Wallet, BlockchainError),
-    TransactionID(Wallet, BlockchainError),
+    GasPrice(BlockchainError),
+    TransactionFeeBalance(Address, BlockchainError),
+    ServiceFeeBalance(Address, BlockchainError),
     UninitializedBlockchainInterface,
 }
 
 impl Display for BlockchainAgentBuildError {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         let preformatted_or_complete = match self {
-            Self::GasPrice(persistent_config_e) => Either::Left(format!(
-                "gas price from the database: {:?}",
-                persistent_config_e
+            Self::GasPrice(blockchain_e) => {
+                Either::Left(format!("gas price due to: {:?}", blockchain_e))
+            }
+            Self::TransactionFeeBalance(address, blockchain_e) => Either::Left(format!(
+                "transaction fee balance for our earning wallet {:#x} due to: {}",
+                address, blockchain_e
             )),
-            Self::TransactionFeeBalance(wallet, blockchain_e) => Either::Left(format!(
-                "transaction fee balance for our earning wallet {} due to: {}",
-                wallet, blockchain_e
-            )),
-            Self::ServiceFeeBalance(wallet, blockchain_e) => Either::Left(format!(
-                "masq balance for our earning wallet {} due to {}",
-                wallet, blockchain_e
-            )),
-            Self::TransactionID(wallet, blockchain_e) => Either::Left(format!(
-                "transaction id for our earning wallet {} due to {}",
-                wallet, blockchain_e
+            Self::ServiceFeeBalance(address, blockchain_e) => Either::Left(format!(
+                "masq balance for our earning wallet {:#x} due to {}",
+                address, blockchain_e
             )),
             Self::UninitializedBlockchainInterface => {
                 Either::Right(BLOCKCHAIN_SERVICE_URL_NOT_SPECIFIED.to_string())
@@ -127,12 +116,11 @@ impl Display for BlockchainAgentBuildError {
 
 #[cfg(test)]
 mod tests {
-    use crate::blockchain::blockchain_interface::data_structures::errors::BLOCKCHAIN_SERVICE_URL_NOT_SPECIFIED;
-    use crate::blockchain::blockchain_interface::{
-        BlockchainAgentBuildError, BlockchainError, PayableTransactionError,
+    use crate::blockchain::blockchain_interface::data_structures::errors::{
+        PayableTransactionError, BLOCKCHAIN_SERVICE_URL_NOT_SPECIFIED,
     };
+    use crate::blockchain::blockchain_interface::{BlockchainAgentBuildError, BlockchainError};
     use crate::blockchain::test_utils::make_tx_hash;
-    use crate::db_config::persistent_configuration::PersistentConfigError;
     use crate::test_utils::make_wallet;
     use masq_lib::utils::{slice_of_strs_to_vec_of_strings, to_string};
 
@@ -180,9 +168,9 @@ mod tests {
     fn payable_payment_error_implements_display() {
         let original_errors = [
             PayableTransactionError::MissingConsumingWallet,
-            PayableTransactionError::GasPriceQueryFailed(
+            PayableTransactionError::GasPriceQueryFailed(BlockchainError::QueryFailed(
                 "Gas halves shut, no drop left".to_string(),
-            ),
+            )),
             PayableTransactionError::TransactionID(BlockchainError::InvalidResponse),
             PayableTransactionError::UnusableWallet(
                 "This is a LEATHER wallet, not LEDGER wallet, stupid.".to_string(),
@@ -208,7 +196,7 @@ mod tests {
             actual_error_msgs,
             slice_of_strs_to_vec_of_strings(&[
                 "Missing consuming wallet to pay payable from",
-                "Unsuccessful gas price query: \"Gas halves shut, no drop left\"",
+                "Unsuccessful gas price query: \"Blockchain error: Query failed: Gas halves shut, no drop left\"",
                 "Transaction id fetching failed: Blockchain error: Invalid response",
                 "Unusable wallet for signing payable transactions: \"This is a LEATHER wallet, not \
                 LEDGER wallet, stupid.\"",
@@ -225,16 +213,15 @@ mod tests {
     fn blockchain_agent_build_error_implements_display() {
         let wallet = make_wallet("abc");
         let original_errors = [
-            BlockchainAgentBuildError::GasPrice(PersistentConfigError::NotPresent),
+            BlockchainAgentBuildError::GasPrice(BlockchainError::InvalidResponse),
             BlockchainAgentBuildError::TransactionFeeBalance(
-                wallet.clone(),
+                wallet.address(),
                 BlockchainError::InvalidResponse,
             ),
             BlockchainAgentBuildError::ServiceFeeBalance(
-                wallet.clone(),
+                wallet.address(),
                 BlockchainError::InvalidAddress,
             ),
-            BlockchainAgentBuildError::TransactionID(wallet.clone(), BlockchainError::InvalidUrl),
             BlockchainAgentBuildError::UninitializedBlockchainInterface,
         ];
 
@@ -248,13 +235,11 @@ mod tests {
         assert_eq!(
             actual_error_msgs,
             slice_of_strs_to_vec_of_strings(&[
-                "Blockchain agent construction failed at fetching gas price from the database: NotPresent",
+                "Blockchain agent construction failed at fetching gas price due to: InvalidResponse",
                 "Blockchain agent construction failed at fetching transaction fee balance for our earning \
                 wallet 0x0000000000000000000000000000000000616263 due to: Blockchain error: Invalid response",
                 "Blockchain agent construction failed at fetching masq balance for our earning wallet \
                 0x0000000000000000000000000000000000616263 due to Blockchain error: Invalid address",
-                "Blockchain agent construction failed at fetching transaction id for our earning wallet \
-                0x0000000000000000000000000000000000616263 due to Blockchain error: Invalid url",
                 BLOCKCHAIN_SERVICE_URL_NOT_SPECIFIED
             ])
         )

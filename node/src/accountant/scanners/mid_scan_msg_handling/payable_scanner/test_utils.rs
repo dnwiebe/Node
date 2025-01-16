@@ -7,16 +7,27 @@ use crate::sub_lib::blockchain_bridge::ConsumingWalletBalances;
 use crate::sub_lib::wallet::Wallet;
 use crate::test_utils::unshared_test_utils::arbitrary_id_stamp::ArbitraryIdStamp;
 use crate::{arbitrary_id_stamp_in_trait_impl, set_arbitrary_id_stamp_in_mock_impl};
-use ethereum_types::U256;
+use masq_lib::blockchains::chains::Chain;
 use std::cell::RefCell;
 
-#[derive(Default)]
 pub struct BlockchainAgentMock {
     consuming_wallet_balances_results: RefCell<Vec<ConsumingWalletBalances>>,
-    agreed_fee_per_computation_unit_results: RefCell<Vec<u64>>,
+    agreed_fee_per_computation_unit_results: RefCell<Vec<u128>>,
     consuming_wallet_result_opt: Option<Wallet>,
-    pending_transaction_id_results: RefCell<Vec<U256>>,
     arbitrary_id_stamp_opt: Option<ArbitraryIdStamp>,
+    get_chain_result_opt: Option<Chain>,
+}
+
+impl Default for BlockchainAgentMock {
+    fn default() -> Self {
+        BlockchainAgentMock {
+            consuming_wallet_balances_results: RefCell::new(vec![]),
+            agreed_fee_per_computation_unit_results: RefCell::new(vec![]),
+            consuming_wallet_result_opt: None,
+            arbitrary_id_stamp_opt: None,
+            get_chain_result_opt: None,
+        }
+    }
 }
 
 impl BlockchainAgent for BlockchainAgentMock {
@@ -28,7 +39,7 @@ impl BlockchainAgent for BlockchainAgentMock {
         todo!("to be implemented by GH-711")
     }
 
-    fn agreed_fee_per_computation_unit(&self) -> u64 {
+    fn agreed_fee_per_computation_unit(&self) -> u128 {
         self.agreed_fee_per_computation_unit_results
             .borrow_mut()
             .remove(0)
@@ -38,8 +49,8 @@ impl BlockchainAgent for BlockchainAgentMock {
         self.consuming_wallet_result_opt.as_ref().unwrap()
     }
 
-    fn pending_transaction_id(&self) -> U256 {
-        self.pending_transaction_id_results.borrow_mut().remove(0)
+    fn get_chain(&self) -> Chain {
+        self.get_chain_result_opt.unwrap()
     }
 
     fn dup(&self) -> Box<dyn BlockchainAgent> {
@@ -57,7 +68,7 @@ impl BlockchainAgentMock {
         self
     }
 
-    pub fn agreed_fee_per_computation_unit_result(self, result: u64) -> Self {
+    pub fn agreed_fee_per_computation_unit_result(self, result: u128) -> Self {
         self.agreed_fee_per_computation_unit_results
             .borrow_mut()
             .push(result);
@@ -69,10 +80,8 @@ impl BlockchainAgentMock {
         self
     }
 
-    pub fn pending_transaction_id_result(self, result: U256) -> Self {
-        self.pending_transaction_id_results
-            .borrow_mut()
-            .push(result);
+    pub fn get_chain_result(mut self, get_chain_result: Chain) -> Self {
+        self.get_chain_result_opt = Some(get_chain_result);
         self
     }
 
